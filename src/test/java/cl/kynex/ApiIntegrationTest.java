@@ -209,4 +209,12 @@ class ApiIntegrationTest {
     @Test void corsRejectsUnconfiguredOrigin() throws Exception {
         http.perform(options("/api/v1/products").header("Origin", "https://untrusted.example.com").header("Access-Control-Request-Method", "POST")).andExpect(status().isForbidden());
     }
+    @Test void corsAllowsConfiguredReactOriginAndCredentials() throws Exception {
+        http.perform(options("/api/v1/products").header("Origin", "http://localhost:5173")
+            .header("Access-Control-Request-Method", "POST").header("Access-Control-Request-Headers", "Authorization,Content-Type"))
+            .andExpect(status().isOk()).andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
+            .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
+        http.perform(get("/api/v1/products").header("Origin", "http://localhost:5173"))
+            .andExpect(status().isOk()).andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"));
+    }
 }

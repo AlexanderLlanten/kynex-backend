@@ -42,7 +42,7 @@ public class SecurityConfig {
         return decoder;
     }
 
-    @Bean CorsConfigurationSource cors(SecurityProperties config) {
+    @Bean CorsConfigurationSource corsConfigurationSource(SecurityProperties config) {
         var cors = new CorsConfiguration();
         cors.setAllowedOrigins(config.allowedOrigins());
         cors.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));

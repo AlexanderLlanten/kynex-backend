@@ -1,0 +1,9 @@
+spring:
+  datasource:
+    url: ${TEST_DB_URL}
+kynex:
+  security:
+    cookie-secure: false
+  bootstrap:
+    admin-email: ""
+    admin-password: ""

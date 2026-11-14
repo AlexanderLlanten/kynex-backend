@@ -1,13 +1,13 @@
 # KYNEX Backend
 
-API REST de KYNEX para la evaluación EP3. Esta primera entrega implementa catálogo y autenticación persistidos en PostgreSQL. El proyecto completo continúa en desarrollo.
+API REST de KYNEX para la evaluación EP3. Implementa catálogo y autenticación persistidos en PostgreSQL, conectados con los formularios de cuenta y la gestión de productos de React. El proyecto completo continúa en desarrollo.
 
 ## Funciones disponibles
 
 - Consulta pública de seis productos iniciales, imágenes y categorías.
 - Alta, edición y baja lógica de productos y categorías con autorización de Administrador.
 - Precios decimales, stock no negativo, códigos únicos, referencias y control de versión para evitar sobrescribir ediciones concurrentes.
-- Registro de Cliente con RUN verificado, contraseña elegida y hash BCrypt. El registro no admite asignar roles.
+- Registro de Cliente con RUN verificado, contraseña elegida y hash BCrypt. Conserva nombre, apellidos, correo, fecha de nacimiento opcional, región, comuna y dirección; comprueba su relación. El registro no admite asignar roles.
 - Login, JWT de 10 minutos, identidad actual, renovación rotativa de siete días y logout. El cierre revoca también los accesos de la misma sesión.
 - Renovación en cookie HttpOnly, verificador SHA-256 en la base y detección de reutilización. CSRF obligatorio para las operaciones de autenticación; CORS limitado a orígenes configurados.
 - Rol y estado de cuenta consultados en la base en cada petición autenticada.
@@ -67,7 +67,7 @@ No se incluyen cuentas con contraseñas predeterminadas. El usuario Vendedor tod
 | POST | `/api/v1/auth/refresh`, `/api/v1/auth/logout` | Cookie de renovación y CSRF |
 | GET | `/api/v1/auth/me` | JWT válido |
 
-Antes de una operación de autenticación, consultar `/auth/csrf` conservando las cookies y enviar su `token` en la cabecera `X-XSRF-TOKEN`. Swagger permite incluir esta cabecera a través del ejemplo de petición; para probar un recorrido completo se puede utilizar un cliente HTTP que mantenga cookies. Las operaciones administrativas utilizan `Authorization: Bearer <accessToken>`.
+Antes de una operación de autenticación, consultar `/auth/csrf` conservando las cookies y enviar su `token` en la cabecera `X-XSRF-TOKEN`. Swagger incluye esta cabecera en las operaciones correspondientes. El registro exige `run`, `firstName`, `lastName`, `email`, `password`, `region`, `commune` y `address`; `birthDate` es opcional y debe ser anterior a hoy. Las ubicaciones admitidas coinciden con el catálogo de los formularios KYNEX. Las operaciones administrativas utilizan `Authorization: Bearer <accessToken>`.
 
 El producto utiliza `categoryId`, `code`, `name`, `description`, `price`, `stock`, `criticalStock`, `image`, `featured` y `details`. `details` conserva presentación, ingredientes, nutrición y recomendaciones del catálogo. La respuesta aplana esos metadatos para mantener el contrato de los componentes React. Las imágenes iniciales se sirven en `/media/products/`.
 
@@ -102,9 +102,11 @@ La segunda orden utiliza las mismas variables del entorno. El esquema se valida 
 
 ## Conectar React
 
-En la rama EP3 del frontend, copiar `.env.example` como `.env`, definir `VITE_CATALOG_SOURCE=api` y usar `VITE_API_URL=http://localhost:8080/api/v1`. Reiniciar Vite después de cambiar estas variables. El origen de Vite debe aparecer en `CORS_ALLOWED_ORIGINS`; utilizar `localhost` en ambos servicios para las cookies de la próxima integración de sesión.
+En la rama EP3 del frontend, copiar `.env.example` como `.env`, definir `VITE_DATA_SOURCE=api` y usar `VITE_API_URL=http://localhost:8080/api/v1`. Reiniciar Vite después de cambiar estas variables. El origen de Vite debe aparecer en `CORS_ALLOWED_ORIGINS`; utilizar `localhost` en ambos servicios para las cookies de sesión. La opción anterior `VITE_CATALOG_SOURCE=api` conserva compatibilidad y ahora conecta también las cuentas.
 
-Esta activación conecta la lectura pública del catálogo. La interfaz de sesión y los módulos privados de React conservan por ahora el funcionamiento de EP2. Las escrituras locales de productos se bloquean en el modo conectado para impedir una confirmación que no llegue al servidor.
+Esta activación conecta catálogo, registro, login, recuperación de identidad, renovación, logout y gestión de productos. React mantiene el JWT en memoria y recupera la sesión mediante la cookie HttpOnly; no utiliza identidades ni contraseñas demostrativas. Las pestañas coordinan las mutaciones de sesión con Web Locks y reciben avisos sin credenciales mediante BroadcastChannel. Se requiere un navegador moderno y HTTPS en despliegue; localhost admite las pruebas HTTP.
+
+El Administrador crea, edita y desactiva productos desde React; el Vendedor conserva consulta. La interfaz obtiene las categorías vigentes y conserva metadatos y versión al editar. Usuarios y pedidos administrativos muestran disponibilidad futura mientras se integran, evitando presentar registros demostrativos como datos del servidor. Carrito por cuenta, rutinas y compra siguen pendientes.
 
 ## Condiciones de operación
 

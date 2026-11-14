@@ -10,6 +10,7 @@ import java.net.URI;
 import java.util.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.hibernate.Hibernate;
 
 /** Reglas de catálogo compartidas por los controladores y las pruebas. */
 @Service
@@ -50,7 +51,9 @@ public class CatalogService {
         product.active = false; products.saveAndFlush(product); // Conserva las futuras referencias comerciales.
     }
     private Category findCategory(Long id) { return categories.findById(id).filter(value -> value.active).orElseThrow(ApiException::missing); }
-    private Product findProduct(Long id) { return products.findById(id).filter(value -> value.active && value.category.active).orElseThrow(ApiException::missing); }
+    private Product findProduct(Long id) { return products.findById(id).filter(value -> value.active && categoryOf(value).active).orElseThrow(ApiException::missing); }
+    // Una relación diferida puede ser un proxy. Se obtiene la entidad real antes de leer sus campos.
+    private Category categoryOf(Product product) { return Hibernate.unproxy(product.category, Category.class); }
     private static void checkVersion(Long current, Long expected) {
         if (expected == null || !expected.equals(current)) throw ApiException.conflict("El recurso cambió. Recarga antes de guardar.");
     }
@@ -81,9 +84,10 @@ public class CatalogService {
         throw ApiException.invalid("La imagen debe ser una URL http(s) o un recurso de /media/products/.");
     }
     private Map<String,Object> view(Product product) {
+        var category = categoryOf(product);
         Map<String,Object> result = new LinkedHashMap<>(product.details);
         result.put("id", product.id); result.put("code", product.code); result.put("name", product.name);
-        result.put("description", product.description); result.put("category", product.category.name); result.put("categoryId", product.category.id);
+        result.put("description", product.description); result.put("category", category.name); result.put("categoryId", category.id);
         result.put("price", product.price); result.put("stock", product.stock); result.put("criticalStock", product.criticalStock);
         result.put("image", product.image); result.put("featured", product.featured); result.put("version", product.version);
         return result;

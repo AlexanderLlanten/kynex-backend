@@ -90,6 +90,10 @@ class ApiIntegrationTest {
             .andExpect(jsonPath("$.paths['/api/v1/products']").exists()).andExpect(jsonPath("$.paths['/api/v1/auth/refresh']").exists());
     }
     @Test void unknownProductReturns404() throws Exception { http.perform(get("/api/v1/products/999999")).andExpect(status().isNotFound()); }
+    @Test void existingProductDetailIncludesItsCategoryReference() throws Exception {
+        http.perform(get("/api/v1/products/1")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.category").value("Proteínas")).andExpect(jsonPath("$.categoryId").value(1));
+    }
     @Test void anonymousCannotWriteProducts() throws Exception { http.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content(body(productBody()))).andExpect(status().isUnauthorized()); }
     @Test void clientCannotWriteProducts() throws Exception {
         var session = login(account(Role.CLIENTE));

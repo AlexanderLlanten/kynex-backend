@@ -30,13 +30,18 @@ Copy-Item .env.example .env
 Editar `.env`: elegir `DB_PASSWORD` y reemplazar `JWT_SECRET` por un valor aleatorio. Este comando genera un secreto para copiarlo al archivo:
 
 ```powershell
-[Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
+$secretBytes = New-Object byte[] 48
+$secretGenerator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$secretGenerator.GetBytes($secretBytes)
+[Convert]::ToBase64String($secretBytes)
+$secretGenerator.Dispose()
 ```
 
 Con Docker Desktop iniciado, crear la base:
 
 ```powershell
 docker compose up -d postgres
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 . .\scripts\Load-Environment.ps1
 .\mvnw.cmd spring-boot:run
 ```
@@ -45,7 +50,7 @@ También se admite PostgreSQL instalado directamente: crear una base vacía `kyn
 
 El backend escucha en el puerto 8080. [Swagger local](http://localhost:8080/swagger-ui.html), [catálogo local](http://localhost:8080/api/v1/products), [salud local](http://localhost:8080/actuator/health).
 
-Spring Boot recibe las variables del proceso; no lee `.env` automáticamente. El comando que carga el archivo debe ejecutarse en la misma ventana donde se inicia Maven. No publicar `.env`, volcados de bases ni claves.
+Spring Boot recibe las variables del proceso; no lee `.env` automáticamente. El comando que carga el archivo debe ejecutarse en la misma ventana donde se inicia Maven. La política indicada permite ejecutar el cargador únicamente en esa ventana de PowerShell. No publicar `.env`, volcados de bases ni claves.
 
 ## Primera cuenta de administración
 

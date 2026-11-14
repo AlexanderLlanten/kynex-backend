@@ -25,11 +25,13 @@ public class AuthService {
     private final JwtEncoder encoder;
     private final SecurityProperties config;
     private final String dummyHash;
+    private final LocationCatalog locations;
 
     public AuthService(UserRepository users, RefreshSessionRepository sessions, PasswordEncoder passwords,
-            JwtEncoder encoder, SecurityProperties config) {
+            JwtEncoder encoder, SecurityProperties config, LocationCatalog locations) {
         this.users = users; this.sessions = sessions; this.passwords = passwords; this.encoder = encoder; this.config = config;
         dummyHash = passwords.encode(UUID.randomUUID().toString());
+        this.locations = locations;
     }
     public record Issued(Session body, String refreshToken) {}
 
@@ -40,10 +42,13 @@ public class AuthService {
         if (users.findByEmail(email).isPresent() || users.existsByRun(run))
             throw ApiException.conflict("El RUN o correo ya está registrado.");
         checkPassword(data.password());
+        locations.validate(data.region().trim(), data.commune().trim());
         var user = new AppUser();
         user.email = email; user.run = run; user.firstName = data.firstName().trim(); user.lastName = data.lastName().trim();
         if (user.firstName.isEmpty() || user.lastName.isEmpty()) throw ApiException.invalid("Nombre y apellidos son obligatorios.");
         user.passwordHash = passwords.encode(data.password());
+        user.birthDate = data.birthDate(); user.region = data.region().trim(); user.commune = data.commune().trim(); user.address = data.address().trim();
+        if (user.address.isEmpty()) throw ApiException.invalid("La dirección es obligatoria.");
         user.role = Role.CLIENTE; // El formulario público no admite un rol enviado por el cliente.
         return UserView.from(users.saveAndFlush(user));
     }
@@ -91,7 +96,7 @@ public class AuthService {
 
     public static String normalizeRun(String value) {
         String run = value.replace(".", "").replace("-", "").trim().toUpperCase(Locale.ROOT);
-        if (!run.matches("[0-9]{7,8}[0-9K]")) throw ApiException.invalid("El RUN no es válido.");
+        if (!run.matches("[0-9]{6,8}[0-9K]")) throw ApiException.invalid("El RUN no es válido.");
         int sum = 0, multiplier = 2;
         for (int i = run.length() - 2; i >= 0; i--) { sum += (run.charAt(i) - '0') * multiplier; multiplier = multiplier == 7 ? 2 : multiplier + 1; }
         int check = 11 - sum % 11;

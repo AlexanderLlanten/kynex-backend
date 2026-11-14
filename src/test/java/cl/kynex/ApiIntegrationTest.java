@@ -142,12 +142,15 @@ class ApiIntegrationTest {
         http.perform(delete("/api/v1/categories/" + id + "?version=1").header("Authorization", auth)).andExpect(status().isNoContent());
         assertThat(categories.findById(id).orElseThrow().active).isFalse();
     }
-    private Map<String,Object> registration() { return new LinkedHashMap<>(Map.of("run", "12.345.678-5", "firstName", "Camila", "lastName", "Soto", "email", "nuevo@example.com", "password", PASSWORD)); }
+    private Map<String,Object> registration() { return new LinkedHashMap<>(Map.of("run", "12.345.678-5", "firstName", "Camila", "lastName", "Soto", "email", "nuevo@example.com", "password", PASSWORD,
+        "region", "Región Metropolitana de Santiago", "commune", "Santiago", "address", "Dirección de prueba 123")); }
     @Test void registrationAlwaysCreatesClientWithHash() throws Exception {
         http.perform(post("/api/v1/auth/register").with(browserCsrf()).contentType(MediaType.APPLICATION_JSON).content(body(registration())))
             .andExpect(status().isCreated()).andExpect(jsonPath("$.role").value("Cliente")).andExpect(jsonPath("$.passwordHash").doesNotExist());
         var user = users.findByEmail("nuevo@example.com").orElseThrow();
         assertThat(user.run).isEqualTo("123456785"); assertThat(user.passwordHash).startsWith("$2").isNotEqualTo(PASSWORD);
+        assertThat(user.region).isEqualTo("Región Metropolitana de Santiago");
+        assertThat(user.commune).isEqualTo("Santiago"); assertThat(user.address).isEqualTo("Dirección de prueba 123");
         assertThat(new BCryptPasswordEncoder().matches(PASSWORD, user.passwordHash)).isTrue();
     }
     @Test void registrationRejectsRoleInjection() throws Exception {
@@ -158,6 +161,16 @@ class ApiIntegrationTest {
     @Test void invalidRunIsRejected() throws Exception {
         var data = registration(); data.put("run", "12345678-9");
         http.perform(post("/api/v1/auth/register").with(browserCsrf()).contentType(MediaType.APPLICATION_JSON).content(body(data))).andExpect(status().isBadRequest());
+    }
+    @Test void unrelatedRegionAndCommuneAreRejected() throws Exception {
+        var data = registration(); data.put("commune", "Temuco");
+        http.perform(post("/api/v1/auth/register").with(browserCsrf()).contentType(MediaType.APPLICATION_JSON).content(body(data))).andExpect(status().isBadRequest());
+        assertThat(users.findByEmail("nuevo@example.com")).isEmpty();
+    }
+    @Test void missingAddressAndFutureBirthDateAreRejected() throws Exception {
+        var data = registration(); data.put("address", ""); data.put("birthDate", "2999-01-01");
+        http.perform(post("/api/v1/auth/register").with(browserCsrf()).contentType(MediaType.APPLICATION_JSON).content(body(data)))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.errors.address").exists()).andExpect(jsonPath("$.errors.birthDate").exists());
     }
     @Test void loginNeedsCsrfToken() throws Exception { http.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("{}" )).andExpect(status().isForbidden()); }
     @Test void realCsrfCookieAndHeaderPermitLogin() throws Exception {

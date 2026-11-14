@@ -2,6 +2,7 @@ package cl.kynex.entity;
 
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.time.LocalDate;
 
 /** Identidad persistente. El hash nunca se entrega en las respuestas de la API. */
 @Entity
@@ -12,6 +13,10 @@ public class AppUser {
     public String firstName;
     public String lastName;
     public String email;
+    public LocalDate birthDate;
+    public String region;
+    public String commune;
+    public String address;
     public String passwordHash;
     @Enumerated(EnumType.STRING) public Role role = Role.CLIENTE;
     public boolean active = true;

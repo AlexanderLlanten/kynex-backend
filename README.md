@@ -24,7 +24,10 @@ API REST de KYNEX para la evaluación EP3. Implementa cuentas, catálogo, carrit
 - Biblioteca pública de ocho ejercicios con fotografías originales. Administrador puede crear, editar, desactivar y reactivar ejercicios con control de versión.
 - Rutinas privadas múltiples por cuenta, nombre único por propietario, prescripciones personales y confirmación de versión. La baja de ejercicios conserva las referencias existentes.
 
-Contacto y su atención administrativa se incorporarán en el siguiente bloque. Los comprobantes son internos del proyecto y no constituyen documentos tributarios.
+- Recepción pública de contacto con referencia idempotente, validación en servidor y confirmación posterior a la persistencia.
+- Bandeja de contacto exclusiva de Administrador, filtro de estado, páginas de 20 registros, notas internas, historial y control de cambios simultáneos.
+
+Los comprobantes son internos del proyecto y no constituyen documentos tributarios.
 
 ## Requisitos
 
@@ -142,6 +145,21 @@ Crear una rutina recibe `{ name }`; renombrarla recibe `{ name, version }`. El n
 
 Las escrituras se serializan con el bloqueo de la cuenta y comprueban la versión de la rutina. El cambio concurrente se rechaza antes de sobrescribir. Eliminar una rutina retira únicamente sus ítems; vaciar conserva el nombre. Desactivar un ejercicio no elimina sus referencias previas y editar sus sugerencias no altera la prescripción personal. La cuenta desactivada conserva sus rutinas para una reactivación posterior.
 
+## Contacto y atención interna
+
+V9 añade `contact_message` y `contact_event` sin sustituir datos existentes. `POST /api/v1/contact` es público y recibe `{ submissionKey, name, email, comment }`. La referencia es un UUID generado por el cliente; repetir la misma referencia y contenido devuelve el mismo recibo sin duplicar el registro ni reiniciar su atención. Reutilizarla con contenido diferente devuelve 409. La respuesta pública contiene únicamente `reference` y `receivedAt`.
+
+El nombre y correo admiten 100 caracteres y el comentario 500. Se recortan espacios exteriores y se normaliza el correo. Se conservan los dominios `duoc.cl`, `profesor.duoc.cl` y `gmail.com`. No se admite elegir id, propietario, estado o notas en el envío público. No existe una consulta pública del contenido recibido.
+
+| Método | Ruta | Acceso y resultado |
+| --- | --- | --- |
+| POST | `/api/v1/contact` | Público; recibo tras persistir, 201 |
+| GET | `/api/v1/admin/contact?status=PENDIENTE&page=0` | Administrador; filtro opcional y páginas de 20 registros |
+| GET | `/api/v1/admin/contact/{id}` | Administrador; contenido original, atención e historial |
+| PUT | `/api/v1/admin/contact/{id}` | Administrador; `{ status, note, version }` |
+
+Los estados son `PENDIENTE`, `EN_ATENCION` y `RESUELTA`. Resolver exige una nota de atención; la nota admite 1000 caracteres. Reabrir conserva el historial. Cada cambio registra fecha, estado, nota e identidad del administrador en el servidor. El mensaje original no se edita. Los cambios usan versión y bloqueo transaccional; un conflicto devuelve 409. Las notas son internas y no se envían por correo. Cliente y Vendedor reciben 403 en toda la gestión. Swagger identifica el envío público y las operaciones protegidas.
+
 ## Gestión de cuentas y perfil
 
 La creación recibe `{ profile, role }`: `profile` utiliza los campos del registro y la contraseña elegida; `role` admite `ADMINISTRADOR`, `VENDEDOR` o `CLIENTE`. La edición recibe `{ profile, role, version }` y excluye la contraseña. Las respuestas presentan el rol en español, `active` y `version`. El listado incluye cuentas inactivas para poder reactivarlas.
@@ -176,7 +194,7 @@ Con Docker puede crearse en el mismo contenedor:
 docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" kynex_test'
 ```
 
-Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; los casos concurrentes utilizan registros propios y los limpian. La prueba de stock restaura el producto utilizado. Las 112 pruebas comprueban controladores, propiedad, límites, idempotencia, expiración, roles, versiones, bajas, Unicode y concurrencia sobre PostgreSQL real. GitHub Actions dispone de su propia base aislada.
+Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; los casos concurrentes utilizan registros propios y los limpian. La prueba de stock restaura el producto utilizado. Las 134 pruebas comprueban controladores, propiedad, límites, idempotencia, expiración, roles, versiones, bajas, Unicode y concurrencia sobre PostgreSQL real. Contacto incluye reintentos concurrentes, atención e historial, cambios de rol y contratos Swagger. GitHub Actions dispone de su propia base aislada.
 
 Para obtener el ejecutable:
 
@@ -193,7 +211,7 @@ En la rama EP3 del frontend, copiar `.env.example` como `.env`, definir `VITE_DA
 
 Esta activación conecta catálogo, cuentas, gestión de productos, carrito, checkout, pagos y pedidos. React mantiene el JWT en memoria y recupera la sesión mediante la cookie HttpOnly; no utiliza identidades ni contraseñas demostrativas. Las pestañas coordinan las mutaciones de sesión con Web Locks y reciben avisos sin credenciales mediante BroadcastChannel. Se requiere un navegador moderno y HTTPS en despliegue; localhost admite las pruebas HTTP.
 
-El Administrador gestiona usuarios, categorías, productos, ejercicios y estados de pedidos; el Vendedor conserva consulta administrativa de productos y pedidos. Cada cuenta dispone de Mi perfil y rutinas propias. La interfaz conserva metadatos y versión al editar. Contacto mantiene su alcance local hasta su integración.
+El Administrador gestiona usuarios, categorías, productos, ejercicios, estados de pedidos y atención de contacto; el Vendedor conserva consulta administrativa de productos y pedidos. Cada cuenta dispone de Mi perfil y rutinas propias. La interfaz conserva metadatos y versión al editar. Contacto confirma la recepción persistida y su atención utiliza una bandeja protegida.
 
 ## Condiciones de operación
 

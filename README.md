@@ -11,13 +11,16 @@ API REST de KYNEX para la evaluación EP3. Implementa cuentas, catálogo, carrit
 - Login, JWT de 10 minutos, identidad actual, renovación rotativa de siete días y logout. El cierre revoca también los accesos de la misma sesión.
 - Renovación en cookie HttpOnly, verificador SHA-256 en la base y detección de reutilización. CSRF obligatorio para las operaciones de autenticación; CORS limitado a orígenes configurados.
 - Rol y estado de cuenta consultados en la base en cada petición autenticada.
+- CRUD administrativo de cuentas con contraseña inicial elegida, edición de rol y perfil, baja lógica y reactivación. No se devuelve el hash ni se cambia una contraseña al editar.
+- Perfil personal limitado a la identidad autenticada. Versiones y coordinación en PostgreSQL evitan sobrescrituras y cambios administrativos concurrentes inconsistentes.
+- Se impide desactivar la cuenta propia o cambiar su rol. La desactivación revoca las sesiones; reactivar no rehabilita tokens anteriores.
 - Carrito por cuenta, conciliación idempotente del visitante y advertencias de disponibilidad. Versiones evitan sobrescribir cambios de otra pestaña.
 - Pedidos con destinatario y productos históricos; precios y despacho calculados en el servidor. Crear un pedido no reserva ni descuenta inventario.
 - Pago académico con aprobación, rechazo, cancelación, expiración y error técnico. Aprobación e inventario se actualizan en una transacción; repetir no duplica sus efectos.
 - Historial propio; consulta administrativa para Administrador y Vendedor. Solo Administrador modifica estados; una anulación autorizada restituye stock una vez y registra reversión de prueba.
 - Esquema versionado con Flyway, Swagger y comprobación de salud.
 
-Perfil editable, gestión completa de usuarios, ejercicios, rutinas y contacto se incorporarán en los siguientes bloques. Los comprobantes son internos del proyecto y no constituyen documentos tributarios.
+Ejercicios, rutinas y contacto se incorporarán en los siguientes bloques. Los comprobantes son internos del proyecto y no constituyen documentos tributarios.
 
 ## Requisitos
 
@@ -69,7 +72,7 @@ Spring Boot recibe las variables del proceso; no lee `.env` automáticamente. El
 
 Antes del primer inicio, definir `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` en `.env`. La contraseña debe tener al menos diez caracteres y como máximo 72 bytes UTF-8. La cuenta se crea solo si ese correo no existe. Quitar ambas variables después del alta y recargar el entorno. El inicio posterior no modifica cuentas existentes ni eleva un Cliente registrado.
 
-No se incluyen cuentas con contraseñas predeterminadas. El usuario Vendedor todavía no tiene interfaz de alta; sus permisos están comprobados mediante pruebas de API.
+No se incluyen cuentas con contraseñas predeterminadas. Después del alta inicial, Administrador puede crear Vendedores, Clientes u otros Administradores desde React, eligiendo su contraseña inicial y entregándola al titular por un canal privado.
 
 ## Contrato inicial
 
@@ -84,6 +87,11 @@ No se incluyen cuentas con contraseñas predeterminadas. El usuario Vendedor tod
 | POST | `/api/v1/auth/register`, `/api/v1/auth/login` | Público con CSRF |
 | POST | `/api/v1/auth/refresh`, `/api/v1/auth/logout` | Cookie de renovación y CSRF |
 | GET | `/api/v1/auth/me` | JWT válido |
+| GET, POST | `/api/v1/admin/users` | Administrador; listado o creación |
+| GET, PUT | `/api/v1/admin/users/{id}` | Administrador; consulta o edición con versión |
+| DELETE | `/api/v1/admin/users/{id}?version=0` | Administrador; desactivación conservando historial |
+| PUT | `/api/v1/admin/users/{id}/activation` | Administrador; reactivación con versión |
+| GET, PUT | `/api/v1/profile` | Cuenta propietaria; edición con versión y sin rol ni estado |
 | GET | `/api/v1/cart` | Cuenta propietaria |
 | PUT | `/api/v1/cart/items/{id}` | Propietario; `quantity` y `version`; cero retira la línea |
 | DELETE | `/api/v1/cart?version=0` | Cuenta propietaria |
@@ -101,6 +109,14 @@ Antes de una operación de autenticación, consultar `/auth/csrf` conservando la
 El producto utiliza `categoryId`, `code`, `name`, `description`, `price`, `stock`, `criticalStock`, `image`, `featured` y `details`. `details` conserva presentación, ingredientes, nutrición y recomendaciones del catálogo. La respuesta aplana esos metadatos para mantener el contrato de los componentes React. Las imágenes iniciales se sirven en `/media/products/`.
 
 Los errores de validación devuelven 400 y campos en `errors`. Las credenciales inválidas devuelven 401; los permisos insuficientes, 403; los recursos inexistentes, 404; los duplicados, referencias activas y conflictos de versión, 409.
+
+## Gestión de cuentas y perfil
+
+La creación recibe `{ profile, role }`: `profile` utiliza los campos del registro y la contraseña elegida; `role` admite `ADMINISTRADOR`, `VENDEDOR` o `CLIENTE`. La edición recibe `{ profile, role, version }` y excluye la contraseña. Las respuestas presentan el rol en español, `active` y `version`. El listado incluye cuentas inactivas para poder reactivarlas.
+
+El perfil personal recibe `{ profile, version }`; no admite id de propietario, rol, estado ni contraseña. El servidor valida RUN y correo únicos, ubicación, fecha y límites. Su identidad se obtiene del JWT. Los cambios conservan las copias históricas de los pedidos. El Administrador inicial debe completar su RUN y dirección antes de guardar su perfil.
+
+Los cambios de administración se serializan con una fila de coordinación y vuelven a comprobar el rol del actor. El servidor protege la cuenta propia y la existencia de administración activa. Las operaciones de renovación y desactivación bloquean primero la cuenta y después las sesiones para evitar ciclos de bloqueo. Una baja conserva los registros y revoca sus familias de sesión; después de reactivar se requiere un nuevo login. El rol vigente se aplica también a JWT ya emitidos.
 
 ## Compra y pago académico
 
@@ -128,7 +144,7 @@ Con Docker puede crearse en el mismo contenedor:
 docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" kynex_test'
 ```
 
-Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; el caso concurrente utiliza cuentas propias, limpia sus registros y restaura el producto de prueba. Las 56 pruebas comprueban controladores, seguridad, propiedad, idempotencia, expiración y concurrencia sobre PostgreSQL real. GitHub Actions dispone de su propia base aislada.
+Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; los casos concurrentes utilizan cuentas propias y limpian sus registros. La prueba de stock restaura el producto utilizado. Las 79 pruebas comprueban controladores, propiedad, idempotencia, expiración, roles, versiones, bajas y concurrencia sobre PostgreSQL real. GitHub Actions dispone de su propia base aislada.
 
 Para obtener el ejecutable:
 
@@ -145,7 +161,7 @@ En la rama EP3 del frontend, copiar `.env.example` como `.env`, definir `VITE_DA
 
 Esta activación conecta catálogo, cuentas, gestión de productos, carrito, checkout, pagos y pedidos. React mantiene el JWT en memoria y recupera la sesión mediante la cookie HttpOnly; no utiliza identidades ni contraseñas demostrativas. Las pestañas coordinan las mutaciones de sesión con Web Locks y reciben avisos sin credenciales mediante BroadcastChannel. Se requiere un navegador moderno y HTTPS en despliegue; localhost admite las pruebas HTTP.
 
-El Administrador gestiona productos y estados de pedidos; el Vendedor conserva consulta. La interfaz obtiene las categorías vigentes y conserva metadatos y versión al editar. Usuarios administrativos muestran disponibilidad futura. Rutinas y contacto mantienen su alcance local hasta su integración.
+El Administrador gestiona usuarios, productos y estados de pedidos; el Vendedor conserva consulta de productos y pedidos. Cada cuenta dispone de Mi perfil. La interfaz obtiene categorías y conserva metadatos y versión al editar. Rutinas y contacto mantienen su alcance local hasta su integración.
 
 ## Condiciones de operación
 

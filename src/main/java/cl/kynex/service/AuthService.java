@@ -65,6 +65,8 @@ public class AuthService {
     @Transactional(noRollbackFor = ApiException.class)
     public Issued refresh(String token) {
         if (token == null || token.length() > 200) throw unauthorized();
+        // El mismo orden que la desactivación: primero la cuenta, después sus sesiones.
+        users.lockById(sessions.ownerByHash(hash(token)).orElseThrow(AuthService::unauthorized)).orElseThrow(AuthService::unauthorized);
         var session = sessions.lockByHash(hash(token)).orElseThrow(AuthService::unauthorized);
         if (session.revoked || session.consumedAt != null || session.expiresAt.isBefore(Instant.now()) || !session.user.active) {
             sessions.revokeFamily(session.family);
@@ -76,7 +78,10 @@ public class AuthService {
 
     @Transactional
     public void logout(String token) {
-        if (token != null && token.length() <= 200) sessions.lockByHash(hash(token)).ifPresent(session -> sessions.revokeFamily(session.family));
+        if (token != null && token.length() <= 200) sessions.ownerByHash(hash(token)).ifPresent(owner -> {
+            users.lockById(owner);
+            sessions.lockByHash(hash(token)).ifPresent(session -> sessions.revokeFamily(session.family));
+        });
     }
 
     @Transactional(readOnly = true)

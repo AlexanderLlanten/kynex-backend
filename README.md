@@ -26,6 +26,7 @@ API REST de KYNEX para la evaluación EP3. Implementa cuentas, catálogo, carrit
 
 - Recepción pública de contacto con referencia idempotente, validación en servidor y confirmación posterior a la persistencia.
 - Bandeja de contacto exclusiva de Administrador, filtro de estado, páginas de 20 registros, notas internas, historial y control de cambios simultáneos.
+- Consultas vinculadas a cada cuenta y respuestas publicadas por Administrador, separadas de las notas internas. Recuperación de consultas anteriores mediante referencia y correo coincidente.
 
 Los comprobantes son internos del proyecto y no constituyen documentos tributarios.
 
@@ -147,6 +148,12 @@ Las escrituras se serializan con el bloqueo de la cuenta y comprueban la versió
 
 ## Contacto y atención interna
 
+V10 incorpora propietario y respuestas publicadas sin convertir las notas existentes en respuestas. Un envío autenticado utiliza `POST /api/v1/my/contact` con `{ submissionKey, comment }`: el servidor obtiene propietario, nombre y correo de la cuenta. No admite elegir otra identidad. Las consultas propias se recuperan mediante `GET /api/v1/my/contact?page=0` y `GET /api/v1/my/contact/{id}`; las respuestas excluyen notas, historial interno e identidad del administrador. Un identificador ajeno devuelve 404, incluso si el lector es Administrador.
+
+Las consultas antiguas y las enviadas sin sesión no se asignan automáticamente por correo. `POST /api/v1/my/contact/claims` recibe `{ reference }` y exige sesión, la referencia UUID de recepción y el mismo correo en la cuenta. El vínculo no puede transferirse. Una vez vinculado, la propiedad sigue a la cuenta aunque cambie su correo.
+
+Administrador publica mediante `POST /api/v1/admin/contact/{id}/replies` con `{ text, replyKey, version }`. La respuesta admite 2000 caracteres y se conserva en su propia tabla; la clave UUID evita duplicar publicaciones al perder una respuesta de red. Una consulta pendiente pasa a En atención. Los conflictos de versión devuelven 409. Las notas anteriores permanecen privadas: para contestar al remitente debe escribirse expresamente una respuesta publicada. Su lectura se realiza dentro de la cuenta y no envía correo.
+
 V9 añade `contact_message` y `contact_event` sin sustituir datos existentes. `POST /api/v1/contact` es público y recibe `{ submissionKey, name, email, comment }`. La referencia es un UUID generado por el cliente; repetir la misma referencia y contenido devuelve el mismo recibo sin duplicar el registro ni reiniciar su atención. Reutilizarla con contenido diferente devuelve 409. La respuesta pública contiene únicamente `reference` y `receivedAt`.
 
 El nombre y correo admiten 100 caracteres y el comentario 500. Se recortan espacios exteriores y se normaliza el correo. Se conservan los dominios `duoc.cl`, `profesor.duoc.cl` y `gmail.com`. No se admite elegir id, propietario, estado o notas en el envío público. No existe una consulta pública del contenido recibido.
@@ -194,7 +201,7 @@ Con Docker puede crearse en el mismo contenedor:
 docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" kynex_test'
 ```
 
-Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; los casos concurrentes utilizan registros propios y los limpian. La prueba de stock restaura el producto utilizado. Las 134 pruebas comprueban controladores, propiedad, límites, idempotencia, expiración, roles, versiones, bajas, Unicode y concurrencia sobre PostgreSQL real. Contacto incluye reintentos concurrentes, atención e historial, cambios de rol y contratos Swagger. GitHub Actions dispone de su propia base aislada.
+Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; los casos concurrentes utilizan registros propios y los limpian. La prueba de stock restaura el producto utilizado. Las 152 pruebas comprueban controladores, propiedad, límites, idempotencia, expiración, roles, versiones, bajas, Unicode y concurrencia sobre PostgreSQL real. Contacto incluye respuestas por propietario, separación de notas privadas, vinculación de consultas anteriores, reintentos concurrentes, atención e historial, cambios de rol y contratos Swagger. GitHub Actions dispone de su propia base aislada.
 
 Para obtener el ejecutable:
 

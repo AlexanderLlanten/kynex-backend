@@ -19,6 +19,18 @@ public class ContactController {
     @Operation(summary="Recibir una consulta pública",description="La referencia UUID permite reintentar el mismo contenido sin duplicarlo. Devuelve solo referencia y fecha; no envía correo.")
     @ApiResponses({@ApiResponse(responseCode="201",description="Recepción persistida o reintento del mismo contenido"),@ApiResponse(responseCode="400",description="Campos o referencia inválidos"),@ApiResponse(responseCode="409",description="Referencia utilizada para otro contenido")})
     public Receipt receive(@Valid @RequestBody Submission data) { return contact.receive(data); }
+    @PostMapping("/my/contact") @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary="Enviar una consulta vinculada a la cuenta",description="El propietario, nombre y correo proceden de la cuenta autenticada. Las respuestas estarán disponibles en Mis consultas.")
+    public Receipt receiveOwned(Principal actor,@Valid @RequestBody AccountSubmission data) { return contact.receiveOwned(Long.valueOf(actor.getName()),data); }
+    @GetMapping("/my/contact") @Operation(summary="Consultar las solicitudes propias")
+    public OwnInbox mine(Principal actor,@RequestParam(defaultValue="0") int page) { return contact.mine(Long.valueOf(actor.getName()),page); }
+    @GetMapping("/my/contact/{id}") @Operation(summary="Consultar una solicitud propia y sus respuestas",description="No expone notas internas. Un recurso ajeno devuelve 404.")
+    public OwnDetail mine(Principal actor,@PathVariable Long id) { return contact.mine(Long.valueOf(actor.getName()),id); }
+    @PostMapping("/my/contact/claims") @Operation(summary="Vincular una consulta anterior",description="Requiere sesión, la referencia UUID de recepción y el mismo correo de la cuenta. No asigna consultas por coincidencia de correo.")
+    public OwnDetail claim(Principal actor,@Valid @RequestBody Claim data) { return contact.claim(Long.valueOf(actor.getName()),data); }
+    @PostMapping("/admin/contact/{id}/replies") @PreAuthorize("hasRole('ADMINISTRADOR')")
+    @Operation(summary="Publicar una respuesta para el usuario",description="Se conserva aparte de las notas internas. Requiere versión y referencia de reintento; las respuestas se consultan dentro de la cuenta, sin enviar correo.")
+    public Detail reply(Principal actor,@PathVariable Long id,@Valid @RequestBody ReplyInput data) { return contact.reply(Long.valueOf(actor.getName()),id,data); }
     @GetMapping("/admin/contact") @PreAuthorize("hasRole('ADMINISTRADOR')")
     @Operation(summary="Consultar la bandeja de contacto",description="Exclusivo de Administrador. Páginas de 20 solicitudes, de la más reciente a la más antigua. Filtro opcional por estado.")
     public Inbox inbox(Principal actor,@RequestParam(required=false) Status status,@RequestParam(defaultValue="0") int page) {

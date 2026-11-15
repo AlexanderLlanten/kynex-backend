@@ -24,6 +24,7 @@ public class CatalogService {
         this.categories = categories; this.products = products; this.json = json;
     }
     public List<CategoryView> categories() { return categories.findByActiveTrueOrderById().stream().map(CategoryView::from).toList(); }
+    public CategoryView category(Long id) { return CategoryView.from(findCategory(id)); }
     public List<Map<String,Object>> products() { return products.findByActiveTrueAndCategoryActiveTrueOrderById().stream().map(this::view).toList(); }
     public Map<String,Object> product(Long id) { return view(findProduct(id)); }
 
@@ -31,11 +32,11 @@ public class CatalogService {
         var category = new Category(); category.name = name(data.name()); return CategoryView.from(categories.saveAndFlush(category));
     }
     @Transactional public CategoryView updateCategory(Long id, CategoryInput data) {
-        var category = findCategory(id); checkVersion(category.version, data.version()); category.name = name(data.name());
+        var category = lockedCategory(id); checkVersion(category.version, data.version()); category.name = name(data.name());
         return CategoryView.from(categories.saveAndFlush(category));
     }
     @Transactional public void deleteCategory(Long id, Long version) {
-        var category = findCategory(id); checkVersion(category.version, version);
+        var category = lockedCategory(id); checkVersion(category.version, version);
         if (products.existsByCategoryIdAndActiveTrue(id)) throw ApiException.conflict("La categoría todavía tiene productos activos.");
         category.active = false; categories.saveAndFlush(category);
     }
@@ -51,6 +52,11 @@ public class CatalogService {
         product.active = false; products.saveAndFlush(product); // Conserva las futuras referencias comerciales.
     }
     private Category findCategory(Long id) { return categories.findById(id).filter(value -> value.active).orElseThrow(ApiException::missing); }
+    private Category lockedCategory(Long id) {
+        var category=Hibernate.unproxy(categories.lockById(id).orElseThrow(ApiException::missing),Category.class);
+        if (!category.active) throw ApiException.missing();
+        return category;
+    }
     private Product findProduct(Long id) { return products.findById(id).filter(value -> value.active && categoryOf(value).active).orElseThrow(ApiException::missing); }
     // Una relación diferida puede ser un proxy. Se obtiene la entidad real antes de leer sus campos.
     private Category categoryOf(Product product) { return Hibernate.unproxy(product.category, Category.class); }
@@ -61,7 +67,8 @@ public class CatalogService {
         String trimmed = value.trim(); if (trimmed.isEmpty()) throw ApiException.invalid("El nombre es obligatorio."); return trimmed;
     }
     private void apply(Product product, ProductInput data) {
-        product.category = findCategory(data.categoryId()); product.code = data.code().trim().toUpperCase(Locale.ROOT);
+        // Alta/asignación y baja de categoría comparten bloqueo: no se agrega un producto activo a una categoría desactivada.
+        product.category = lockedCategory(data.categoryId()); product.code = data.code().trim().toUpperCase(Locale.ROOT);
         if (!product.code.matches("[A-Z0-9_-]{3,30}")) throw ApiException.invalid("Usa un código de 3 a 30 letras, números, guiones o guiones bajos.");
         product.name = name(data.name()); product.description = data.description().trim(); product.price = data.price();
         product.stock = data.stock(); product.criticalStock = data.criticalStock(); product.featured = data.featured();

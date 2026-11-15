@@ -39,6 +39,7 @@ class ApiIntegrationTest {
     @Autowired RefreshSessionRepository sessions;
     @Autowired JdbcTemplate jdbc;
     @Autowired JwtEncoder encoder;
+    @Autowired cl.kynex.service.CatalogService catalog;
     private static final String PASSWORD = "ClavePruebas2026!";
     private static final String HASH = new BCryptPasswordEncoder(4).encode(PASSWORD);
 
@@ -145,6 +146,73 @@ class ApiIntegrationTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1));
         http.perform(delete("/api/v1/categories/" + id + "?version=1").header("Authorization", auth)).andExpect(status().isNoContent());
         assertThat(categories.findById(id).orElseThrow().active).isFalse();
+        http.perform(get("/api/v1/categories/"+id)).andExpect(status().isNotFound());
+    }
+    @Test void categoryDetailIsPublicAndIncludesVersion() throws Exception {
+        http.perform(get("/api/v1/categories/2")).andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Creatinas")).andExpect(jsonPath("$.version").value(0));
+    }
+    @Test void categoryNameIsUniqueIgnoringCase() throws Exception {
+        String token="Bearer "+login(account(Role.ADMINISTRADOR)).access();
+        http.perform(post("/api/v1/categories").header("Authorization",token).contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"  cReAtInAs  \"}"))
+            .andExpect(status().isConflict());
+    }
+    @Test void categoryUniquenessIncludesAccentedUppercaseLetters() throws Exception {
+        String token="Bearer "+login(account(Role.ADMINISTRADOR)).access();
+        http.perform(post("/api/v1/categories").header("Authorization",token).contentType(MediaType.APPLICATION_JSON).content(body(Map.of("name","PROTEÍNAS"))))
+            .andExpect(status().isConflict());
+    }
+    @Test void categoryUniquenessIncludesEquivalentUnicodeSpellings() throws Exception {
+        String token="Bearer "+login(account(Role.ADMINISTRADOR)).access();
+        http.perform(post("/api/v1/categories").header("Authorization",token).contentType(MediaType.APPLICATION_JSON).content(body(Map.of("name","Protei\u0301nas"))))
+            .andExpect(status().isConflict());
+    }
+    @Test void staleCategoryEditsAndDeletesAreRejected() throws Exception {
+        String token="Bearer "+login(account(Role.ADMINISTRADOR)).access();
+        http.perform(put("/api/v1/categories/2").header("Authorization",token).contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Otra\",\"version\":9}"))
+            .andExpect(status().isConflict());
+        http.perform(delete("/api/v1/categories/2?version=9").header("Authorization",token)).andExpect(status().isConflict());
+        assertThat(categories.findById(2L).orElseThrow().name).isEqualTo("Creatinas");
+    }
+    @Test void categoryNamesRequireContentAndRespectLength() throws Exception {
+        String token="Bearer "+login(account(Role.ADMINISTRADOR)).access();
+        for(var name:List.of("   ","a".repeat(81)))http.perform(post("/api/v1/categories").header("Authorization",token).contentType(MediaType.APPLICATION_JSON).content(body(Map.of("name",name))))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.errors.name").exists());
+    }
+    @Test void categoryRenameAppearsInPublicProducts() throws Exception {
+        String token="Bearer "+login(account(Role.ADMINISTRADOR)).access();
+        http.perform(put("/api/v1/categories/2").header("Authorization",token).contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Creatinas actualizadas\",\"version\":0}"))
+            .andExpect(status().isOk());
+        http.perform(get("/api/v1/products/2")).andExpect(status().isOk()).andExpect(jsonPath("$.category").value("Creatinas actualizadas"));
+    }
+    @Test void clientAndSellerCannotMutateCategories() throws Exception {
+        for(var role:List.of(Role.CLIENTE,Role.VENDEDOR)) {
+            String token="Bearer "+login(account(role)).access();
+            http.perform(post("/api/v1/categories").header("Authorization",token).contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Nueva\"}")).andExpect(status().isForbidden());
+            http.perform(put("/api/v1/categories/2").header("Authorization",token).contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Nueva\",\"version\":0}")).andExpect(status().isForbidden());
+            http.perform(delete("/api/v1/categories/2?version=0").header("Authorization",token)).andExpect(status().isForbidden());
+        }
+    }
+    @Test void inactiveCategoryCannotReceiveProducts() throws Exception {
+        var category=new cl.kynex.entity.Category();category.name="Inactiva "+UUID.randomUUID();category.active=false;categories.saveAndFlush(category);
+        String token="Bearer "+login(account(Role.ADMINISTRADOR)).access();var data=productBody();data.put("categoryId",category.id);
+        http.perform(post("/api/v1/products").header("Authorization",token).contentType(MediaType.APPLICATION_JSON).content(body(data))).andExpect(status().isNotFound());
+    }
+    @Test @Transactional(propagation=org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void categoryDeactivationAndProductCreationPreserveActiveReferences() throws Exception {
+        var category=catalog.createCategory(new cl.kynex.dto.CatalogDtos.CategoryInput("Concurrente "+UUID.randomUUID(),null));
+        var pool=java.util.concurrent.Executors.newFixedThreadPool(2);var start=new java.util.concurrent.CountDownLatch(1);
+        try {
+            var creating=pool.submit(()->{start.await();try{
+                catalog.createProduct(new cl.kynex.dto.CatalogDtos.ProductInput("RACE"+UUID.randomUUID().toString().substring(0,8),category.id(),"Prueba concurrente","",new BigDecimal("1000"),1,0,"",false,Map.of(),null));return true;
+            }catch(cl.kynex.exception.ApiException denied){return false;}});
+            var disabling=pool.submit(()->{start.await();try{catalog.deleteCategory(category.id(),category.version());return true;}catch(cl.kynex.exception.ApiException denied){return false;}});
+            start.countDown();boolean created=creating.get(10,java.util.concurrent.TimeUnit.SECONDS),disabled=disabling.get(10,java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(created).isNotEqualTo(disabled);
+            var current=categories.findById(category.id()).orElseThrow();assertThat(current.active).isEqualTo(created);
+            assertThat(products.existsByCategoryIdAndActiveTrue(category.id())).isEqualTo(created);
+        } finally {
+            pool.shutdownNow();jdbc.update("delete from product where category_id=?",category.id());jdbc.update("delete from category where id=?",category.id());
+        }
     }
     private Map<String,Object> registration() { return new LinkedHashMap<>(Map.of("run", "12.345.678-5", "firstName", "Camila", "lastName", "Soto", "email", "nuevo@example.com", "password", PASSWORD,
         "region", "Región Metropolitana de Santiago", "commune", "Santiago", "address", "Dirección de prueba 123")); }

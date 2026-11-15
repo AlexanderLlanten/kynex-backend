@@ -19,6 +19,7 @@ public class CatalogController {
     private final CatalogService catalog;
     public CatalogController(CatalogService catalog) { this.catalog = catalog; }
     @GetMapping("/categories") public List<CategoryView> categories() { return catalog.categories(); }
+    @GetMapping("/categories/{id}") public CategoryView category(@PathVariable @Positive Long id) { return catalog.category(id); }
     @GetMapping("/products") public List<Map<String,Object>> products() { return catalog.products(); }
     @GetMapping("/products/{id}") public Map<String,Object> product(@PathVariable @Positive Long id) { return catalog.product(id); }
 

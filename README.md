@@ -72,6 +72,14 @@ El backend escucha en el puerto 8080. [Swagger local](http://localhost:8080/swag
 
 Spring Boot recibe las variables del proceso; no lee `.env` automáticamente. El comando que carga el archivo debe ejecutarse en la misma ventana donde se inicia Maven. La política indicada permite ejecutar el cargador únicamente en esa ventana de PowerShell. No publicar `.env`, volcados de bases ni claves.
 
+Si el editor Java y Maven compilan simultáneamente y aparecen archivos de clase ausentes, puede utilizarse una salida independiente, ya excluida del repositorio:
+
+```powershell
+.\mvnw.cmd -Dkynex.build.directory=.local/maven clean spring-boot:run
+```
+
+Esta opción conserva `target` como salida predeterminada y permite que la ejecución de Maven use `.local/maven`. El comando debe iniciarse con el backend anterior detenido y las variables de entorno cargadas.
+
 ## Primera cuenta de administración
 
 Antes del primer inicio, definir `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` en `.env`. La contraseña debe tener al menos diez caracteres y como máximo 72 bytes UTF-8. La cuenta se crea solo si ese correo no existe. Quitar ambas variables después del alta y recargar el entorno. El inicio posterior no modifica cuentas existentes ni eleva un Cliente registrado.

@@ -19,6 +19,7 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true
+      accept-float-as-int: false
   mvc:
     problemdetails:
       enabled: true
@@ -41,6 +42,9 @@ kynex:
   bootstrap:
     admin-email: ${BOOTSTRAP_ADMIN_EMAIL:}
     admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+  commerce:
+    emulator-enabled: ${PAYMENT_EMULATOR_ENABLED:false}
+    order-duration: PT15M
 springdoc:
   swagger-ui:
     path: /swagger-ui.html

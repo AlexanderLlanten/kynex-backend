@@ -21,4 +21,5 @@ public class AppUser {
     @Enumerated(EnumType.STRING) public Role role = Role.CLIENTE;
     public boolean active = true;
     public Instant createdAt = Instant.now();
+    @Version public Long version = 0L;
 }

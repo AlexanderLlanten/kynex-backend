@@ -12,9 +12,16 @@ public interface RefreshSessionRepository extends JpaRepository<RefreshSession, 
     @Query("select s from RefreshSession s join fetch s.user where s.tokenHash = :hash")
     Optional<RefreshSession> lockByHash(String hash);
 
+    @Query("select s.user.id from RefreshSession s where s.tokenHash = :hash")
+    Optional<Long> ownerByHash(String hash);
+
     boolean existsByFamilyAndRevokedFalseAndExpiresAtAfter(UUID family, Instant instant);
 
     @Modifying(clearAutomatically=true, flushAutomatically=true)
     @Query("update RefreshSession s set s.revoked = true where s.family = :family")
     void revokeFamily(UUID family);
+
+    @Modifying(clearAutomatically=true, flushAutomatically=true)
+    @Query("update RefreshSession s set s.revoked = true where s.user.id = :userId")
+    void revokeUser(Long userId);
 }

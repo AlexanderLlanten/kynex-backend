@@ -1,6 +1,6 @@
 # KYNEX Backend
 
-API REST de KYNEX para la evaluación EP3. Implementa catálogo y autenticación persistidos en PostgreSQL, conectados con los formularios de cuenta y la gestión de productos de React. El proyecto completo continúa en desarrollo.
+API REST de KYNEX para la evaluación EP3. Implementa cuentas, catálogo, carrito privado y pedidos con pago emulado persistidos en PostgreSQL y conectados con React. El proyecto completo continúa en desarrollo.
 
 ## Funciones disponibles
 
@@ -11,9 +11,13 @@ API REST de KYNEX para la evaluación EP3. Implementa catálogo y autenticación
 - Login, JWT de 10 minutos, identidad actual, renovación rotativa de siete días y logout. El cierre revoca también los accesos de la misma sesión.
 - Renovación en cookie HttpOnly, verificador SHA-256 en la base y detección de reutilización. CSRF obligatorio para las operaciones de autenticación; CORS limitado a orígenes configurados.
 - Rol y estado de cuenta consultados en la base en cada petición autenticada.
+- Carrito por cuenta, conciliación idempotente del visitante y advertencias de disponibilidad. Versiones evitan sobrescribir cambios de otra pestaña.
+- Pedidos con destinatario y productos históricos; precios y despacho calculados en el servidor. Crear un pedido no reserva ni descuenta inventario.
+- Pago académico con aprobación, rechazo, cancelación, expiración y error técnico. Aprobación e inventario se actualizan en una transacción; repetir no duplica sus efectos.
+- Historial propio; consulta administrativa para Administrador y Vendedor. Solo Administrador modifica estados; una anulación autorizada restituye stock una vez y registra reversión de prueba.
 - Esquema versionado con Flyway, Swagger y comprobación de salud.
 
-Carrito por cuenta, boletas, pagos emulados, perfil, gestión completa de usuarios, ejercicios, rutinas y contacto se incorporarán en los siguientes bloques. No existen endpoints ficticios que confirmen estas operaciones.
+Perfil editable, gestión completa de usuarios, ejercicios, rutinas y contacto se incorporarán en los siguientes bloques. Los comprobantes son internos del proyecto y no constituyen documentos tributarios.
 
 ## Requisitos
 
@@ -80,12 +84,33 @@ No se incluyen cuentas con contraseñas predeterminadas. El usuario Vendedor tod
 | POST | `/api/v1/auth/register`, `/api/v1/auth/login` | Público con CSRF |
 | POST | `/api/v1/auth/refresh`, `/api/v1/auth/logout` | Cookie de renovación y CSRF |
 | GET | `/api/v1/auth/me` | JWT válido |
+| GET | `/api/v1/cart` | Cuenta propietaria |
+| PUT | `/api/v1/cart/items/{id}` | Propietario; `quantity` y `version`; cero retira la línea |
+| DELETE | `/api/v1/cart?version=0` | Cuenta propietaria |
+| POST | `/api/v1/cart/merge` | Propietario; UUID e `items` con id y cantidad |
+| POST | `/api/v1/orders` | Propietario; UUID, versión del carrito y `delivery` |
+| GET | `/api/v1/orders`, `/api/v1/orders/{id}` | Solo pedidos propios |
+| GET | `/api/v1/payment-options` | Cuenta autenticada; disponibilidad y escenarios |
+| POST | `/api/v1/orders/{id}/payments` | Propietario; UUID y escenario de prueba |
+| POST | `/api/v1/orders/{id}/payments/{paymentId}/confirm` | Propietario; cuerpo vacío, resultado decidido por el servidor |
+| GET | `/api/v1/admin/orders`, `/api/v1/admin/orders/{id}` | Administrador o Vendedor |
+| PUT | `/api/v1/admin/orders/{id}/status` | Administrador; estado, versión y motivo |
 
 Antes de una operación de autenticación, consultar `/auth/csrf` conservando las cookies y enviar su `token` en la cabecera `X-XSRF-TOKEN`. Swagger incluye esta cabecera en las operaciones correspondientes. El registro exige `run`, `firstName`, `lastName`, `email`, `password`, `region`, `commune` y `address`; `birthDate` es opcional y debe ser anterior a hoy. Las ubicaciones admitidas coinciden con el catálogo de los formularios KYNEX. Las operaciones administrativas utilizan `Authorization: Bearer <accessToken>`.
 
 El producto utiliza `categoryId`, `code`, `name`, `description`, `price`, `stock`, `criticalStock`, `image`, `featured` y `details`. `details` conserva presentación, ingredientes, nutrición y recomendaciones del catálogo. La respuesta aplana esos metadatos para mantener el contrato de los componentes React. Las imágenes iniciales se sirven en `/media/products/`.
 
 Los errores de validación devuelven 400 y campos en `errors`. Las credenciales inválidas devuelven 401; los permisos insuficientes, 403; los recursos inexistentes, 404; los duplicados, referencias activas y conflictos de versión, 409.
+
+## Compra y pago académico
+
+Definir `PAYMENT_EMULATOR_ENABLED=true` en `.env` y recargar el entorno antes de iniciar Maven. Por defecto el servidor deshabilita el emulador si no recibe esta opción. No realiza cobros, no solicita tarjetas y no contacta una pasarela externa.
+
+`delivery` contiene `recipient`, `region`, `commune` y `address`. El servidor valida la ubicación y obtiene precios desde el catálogo. El despacho cuesta $3.990 bajo $50.000 y es gratuito desde ese monto; un carrito vacío suma cero. El pedido pendiente vence a los 15 minutos y cada intento, a los cinco minutos como máximo. Los escenarios son `APPROVE`, `REJECT`, `CANCEL`, `EXPIRE` y `TECHNICAL_ERROR`. Cada intención lleva una clave UUID; reutilizarla con datos distintos produce conflicto.
+
+El pago aprobado verifica el stock actual, descuenta todas las líneas de manera conjunta, confirma el pedido y retira solo las cantidades compradas del mismo carrito. El historial conserva precios y nombres originales. Los pagos negativos conservan stock y carrito. Dos compras simultáneas no venden la misma última unidad. Una cuenta no puede leer ni pagar pedidos ajenos.
+
+Los estados avanzan de `CONFIRMED` a `PREPARING`, `SHIPPED` y `DELIVERED`. Administrador puede anular desde `PENDING`, `CONFIRMED` o `PREPARING`; no desde despacho o entrega. La anulación pagada devuelve inventario una sola vez y marca una reversión académica. El motivo y las fechas quedan registrados. La expiración se evalúa al consultar u operar el pedido; no requiere un proceso programado.
 
 ## Pruebas con PostgreSQL
 
@@ -103,7 +128,7 @@ Con Docker puede crearse en el mismo contenedor:
 docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" kynex_test'
 ```
 
-Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Cada caso revierte sus cambios. Se comprueban controladores, seguridad y JPA sobre PostgreSQL real; no se sustituye por H2. GitHub Actions dispone de su propia base aislada.
+Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; el caso concurrente utiliza cuentas propias, limpia sus registros y restaura el producto de prueba. Las 56 pruebas comprueban controladores, seguridad, propiedad, idempotencia, expiración y concurrencia sobre PostgreSQL real. GitHub Actions dispone de su propia base aislada.
 
 Para obtener el ejecutable:
 
@@ -118,10 +143,10 @@ La segunda orden utiliza las mismas variables del entorno. El esquema se valida 
 
 En la rama EP3 del frontend, copiar `.env.example` como `.env`, definir `VITE_DATA_SOURCE=api` y usar `VITE_API_URL=http://localhost:8080/api/v1`. Reiniciar Vite después de cambiar estas variables. El origen de Vite debe aparecer en `CORS_ALLOWED_ORIGINS`; utilizar `localhost` en ambos servicios para las cookies de sesión. La opción anterior `VITE_CATALOG_SOURCE=api` conserva compatibilidad y ahora conecta también las cuentas.
 
-Esta activación conecta catálogo, registro, login, recuperación de identidad, renovación, logout y gestión de productos. React mantiene el JWT en memoria y recupera la sesión mediante la cookie HttpOnly; no utiliza identidades ni contraseñas demostrativas. Las pestañas coordinan las mutaciones de sesión con Web Locks y reciben avisos sin credenciales mediante BroadcastChannel. Se requiere un navegador moderno y HTTPS en despliegue; localhost admite las pruebas HTTP.
+Esta activación conecta catálogo, cuentas, gestión de productos, carrito, checkout, pagos y pedidos. React mantiene el JWT en memoria y recupera la sesión mediante la cookie HttpOnly; no utiliza identidades ni contraseñas demostrativas. Las pestañas coordinan las mutaciones de sesión con Web Locks y reciben avisos sin credenciales mediante BroadcastChannel. Se requiere un navegador moderno y HTTPS en despliegue; localhost admite las pruebas HTTP.
 
-El Administrador crea, edita y desactiva productos desde React; el Vendedor conserva consulta. La interfaz obtiene las categorías vigentes y conserva metadatos y versión al editar. Usuarios y pedidos administrativos muestran disponibilidad futura mientras se integran, evitando presentar registros demostrativos como datos del servidor. Carrito por cuenta, rutinas y compra siguen pendientes.
+El Administrador gestiona productos y estados de pedidos; el Vendedor conserva consulta. La interfaz obtiene las categorías vigentes y conserva metadatos y versión al editar. Usuarios administrativos muestran disponibilidad futura. Rutinas y contacto mantienen su alcance local hasta su integración.
 
 ## Condiciones de operación
 
-`COOKIE_SECURE=false` se admite solo en desarrollo HTTP local. En despliegue se necesita HTTPS, cookies seguras, orígenes explícitos, credenciales externas, limitación de intentos, copias de seguridad y prueba de restauración. Esta versión inicial no se presenta como lista para operación productiva. La pasarela académica futura no efectuará cobros reales ni solicitará datos de tarjetas.
+`COOKIE_SECURE=false` se admite solo en desarrollo HTTP local. En despliegue se necesita HTTPS, cookies seguras, orígenes explícitos, credenciales externas, limitación de intentos, copias de seguridad y prueba de restauración. Esta versión no se presenta como lista para operación productiva. El emulador no efectúa cobros reales ni solicita datos de tarjetas.

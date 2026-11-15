@@ -21,8 +21,10 @@ API REST de KYNEX para la evaluación EP3. Implementa cuentas, catálogo, carrit
 - Pago académico con aprobación, rechazo, cancelación, expiración y error técnico. Aprobación e inventario se actualizan en una transacción; repetir no duplica sus efectos.
 - Historial propio; consulta administrativa para Administrador y Vendedor. Solo Administrador modifica estados; una anulación autorizada restituye stock una vez y registra reversión de prueba.
 - Esquema versionado con Flyway, Swagger y comprobación de salud.
+- Biblioteca pública de ocho ejercicios con fotografías originales. Administrador puede crear, editar, desactivar y reactivar ejercicios con control de versión.
+- Rutinas privadas múltiples por cuenta, nombre único por propietario, prescripciones personales y confirmación de versión. La baja de ejercicios conserva las referencias existentes.
 
-Ejercicios, rutinas y contacto se incorporarán en los siguientes bloques. Los comprobantes son internos del proyecto y no constituyen documentos tributarios.
+Contacto y su atención administrativa se incorporarán en el siguiente bloque. Los comprobantes son internos del proyecto y no constituyen documentos tributarios.
 
 ## Requisitos
 
@@ -94,6 +96,14 @@ No se incluyen cuentas con contraseñas predeterminadas. Después del alta inici
 | DELETE | `/api/v1/admin/users/{id}?version=0` | Administrador; desactivación conservando historial |
 | PUT | `/api/v1/admin/users/{id}/activation` | Administrador; reactivación con versión |
 | GET, PUT | `/api/v1/profile` | Cuenta propietaria; edición con versión y sin rol ni estado |
+| GET | `/api/v1/exercises`, `/api/v1/exercises/{id}` | Público; ejercicios activos |
+| GET, POST | `/api/v1/admin/exercises` | Administrador; listado completo o alta |
+| GET, PUT, DELETE | `/api/v1/admin/exercises/{id}` | Administrador; consulta, edición o baja lógica; escrituras con versión |
+| PUT | `/api/v1/admin/exercises/{id}/activation` | Administrador; reactivación con versión |
+| GET, POST | `/api/v1/routines` | Rutinas propias; listado o creación |
+| GET, PUT, DELETE | `/api/v1/routines/{id}` | Propietario; consulta, renombre o eliminación con versión |
+| POST, PUT, DELETE | `/api/v1/routines/{id}/items/{exerciseId}` | Propietario; agregar, ajustar o retirar con versión |
+| DELETE | `/api/v1/routines/{id}/items?version=0` | Propietario; vaciar ejercicios conservando la rutina |
 | GET | `/api/v1/cart` | Cuenta propietaria |
 | PUT | `/api/v1/cart/items/{id}` | Propietario; `quantity` y `version`; cero retira la línea |
 | DELETE | `/api/v1/cart?version=0` | Cuenta propietaria |
@@ -115,6 +125,14 @@ La categoría contiene `id`, `name` y `version`. El nombre se recorta y admite h
 Una categoría con productos activos no puede desactivarse. Crear o reasignar un producto y desactivar su categoría comparten bloqueo en PostgreSQL: una de las operaciones se completa y la otra reevalúa el estado resultante. La baja conserva la categoría y sus referencias históricas, pero la retira de las consultas públicas. Las ediciones y bajas requieren la versión vigente.
 
 Los errores de validación devuelven 400 y campos en `errors`. Las credenciales inválidas devuelven 401; los permisos insuficientes, 403; los recursos inexistentes, 404; los duplicados, referencias activas y conflictos de versión, 409.
+
+## Ejercicios y rutinas
+
+V8 incorpora una vez los ocho ejercicios y sus fotografías en `/media/training/`. El ejercicio incluye nombre, descripción, grupo muscular, dificultad, equipamiento, imagen, icono y series/repeticiones sugeridas. Los nombres son únicos con normalización Unicode. Administrador conserva control de versión al editar, desactivar o reactivar; los ejercicios inactivos quedan fuera de la biblioteca pública.
+
+Crear una rutina recibe `{ name }`; renombrarla recibe `{ name, version }`. El nombre admite hasta 100 caracteres y es único dentro de cada cuenta. Se admiten hasta 20 rutinas por propietario y 100 ejercicios distintos por rutina. Agregar recibe `{ version }` y utiliza las sugerencias del servidor; ajustar recibe `{ sets, reps, version }`, con enteros entre 1–20 y 1–100 respectivamente. El navegador no puede elegir el propietario. Los accesos ajenos devuelven 404 y no modifican datos.
+
+Las escrituras se serializan con el bloqueo de la cuenta y comprueban la versión de la rutina. El cambio concurrente se rechaza antes de sobrescribir. Eliminar una rutina retira únicamente sus ítems; vaciar conserva el nombre. Desactivar un ejercicio no elimina sus referencias previas y editar sus sugerencias no altera la prescripción personal. La cuenta desactivada conserva sus rutinas para una reactivación posterior.
 
 ## Gestión de cuentas y perfil
 
@@ -150,7 +168,7 @@ Con Docker puede crearse en el mismo contenedor:
 docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" kynex_test'
 ```
 
-Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; los casos concurrentes utilizan registros propios y los limpian. La prueba de stock restaura el producto utilizado. Las 89 pruebas comprueban controladores, propiedad, idempotencia, expiración, roles, versiones, bajas, unicidad Unicode y concurrencia sobre PostgreSQL real. GitHub Actions dispone de su propia base aislada.
+Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; los casos concurrentes utilizan registros propios y los limpian. La prueba de stock restaura el producto utilizado. Las 112 pruebas comprueban controladores, propiedad, límites, idempotencia, expiración, roles, versiones, bajas, Unicode y concurrencia sobre PostgreSQL real. GitHub Actions dispone de su propia base aislada.
 
 Para obtener el ejecutable:
 
@@ -167,7 +185,7 @@ En la rama EP3 del frontend, copiar `.env.example` como `.env`, definir `VITE_DA
 
 Esta activación conecta catálogo, cuentas, gestión de productos, carrito, checkout, pagos y pedidos. React mantiene el JWT en memoria y recupera la sesión mediante la cookie HttpOnly; no utiliza identidades ni contraseñas demostrativas. Las pestañas coordinan las mutaciones de sesión con Web Locks y reciben avisos sin credenciales mediante BroadcastChannel. Se requiere un navegador moderno y HTTPS en despliegue; localhost admite las pruebas HTTP.
 
-El Administrador gestiona usuarios, categorías, productos y estados de pedidos; el Vendedor conserva consulta de productos y pedidos. Cada cuenta dispone de Mi perfil. La interfaz conserva metadatos y versión al editar y actualiza el catálogo tras renombrar una categoría. Rutinas y contacto mantienen su alcance local hasta su integración.
+El Administrador gestiona usuarios, categorías, productos, ejercicios y estados de pedidos; el Vendedor conserva consulta administrativa de productos y pedidos. Cada cuenta dispone de Mi perfil y rutinas propias. La interfaz conserva metadatos y versión al editar. Contacto mantiene su alcance local hasta su integración.
 
 ## Condiciones de operación
 

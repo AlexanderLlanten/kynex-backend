@@ -77,6 +77,21 @@ public class ContactService {
         return new Inbox(result.map(m->new Summary(m.id,m.name,m.email,m.status,m.createdAt,m.updatedAt)).getContent(),page,result.getTotalPages(),result.getTotalElements());
     }
     public Detail detail(Long actor,Long id) { admin(actor);return view(messages.findById(id).orElseThrow(ApiException::missing)); }
+    /** Recuperación del histórico confirmada por Administración; no concede acceso por correo al iniciar sesión. */
+    public Detail linkAccount(Long actor,Long id,AccountLink data) {
+        var administrator=admin(actor);var initial=messages.findById(id).orElseThrow(ApiException::missing);
+        if(initial.ownerId!=null)return view(initial);
+        var candidate=users.findByEmail(initial.email).filter(user->user.active)
+            .orElseThrow(()->ApiException.invalid("No existe una cuenta activa con el correo de esta consulta."));
+        var account=accounts.lockUser(candidate.id);var message=messages.lockById(id).orElseThrow(ApiException::missing);
+        if(message.ownerId!=null)return view(message);
+        if(!message.version.equals(data.version()))throw ApiException.conflict("La consulta cambió. Recarga antes de vincularla.");
+        if(!message.email.equalsIgnoreCase(account.email))throw ApiException.conflict("El correo de la cuenta cambió. Recarga antes de vincularla.");
+        message.ownerId=account.id;message.updatedAt=Instant.now();messages.saveAndFlush(message);
+        var event=new ContactEvent();event.messageId=id;event.actorId=actor;event.actorName=administrator.firstName+" "+administrator.lastName;
+        event.status=message.status;event.note="Vinculación a la cuenta coincidente confirmada por Administración.";event.createdAt=message.updatedAt;events.saveAndFlush(event);
+        return view(message);
+    }
     public Detail reply(Long actor,Long id,ReplyInput data) {
         var account=admin(actor);var m=messages.lockById(id).orElseThrow(ApiException::missing);var text=data.text().trim();
         if(text.isEmpty())throw ApiException.invalid("Escribe la respuesta para el usuario.");

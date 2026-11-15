@@ -13,6 +13,7 @@ public final class ContactDtos {
     public record Receipt(UUID reference,Instant receivedAt) {}
     public record AccountSubmission(@NotNull UUID submissionKey,@NotBlank @Size(max=500) String comment) {}
     public record Claim(@NotNull UUID reference) {}
+    public record AccountLink(@NotNull @Min(0) Long version) {}
     public record ReplyInput(@NotNull UUID replyKey,@NotBlank @Size(max=2000) String text,@NotNull @Min(0) Long version) {}
     public record ReplyView(String text,Instant createdAt) {}
     public record OwnSummary(Long id,UUID reference,String preview,Status status,Instant createdAt) {}

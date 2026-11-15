@@ -41,6 +41,38 @@ class ContactRepliesIntegrationTest {
     String body(Object data)throws Exception{return json.writeValueAsString(data);}
     Long owned(Long owner){var key=UUID.randomUUID();contact.receiveOwned(owner,new AccountSubmission(key,"Consulta personal"));return messages.findBySubmissionKey(key).orElseThrow().id;}
     UUID legacy(Long owner){var key=UUID.randomUUID();contact.receive(new Submission(key,"Nombre anterior",users.findById(owner).orElseThrow().email,"Consulta anterior"));return key;}
+    @Test void administratorRecoversLegacyOwnershipWithoutPublishingInternalNotes(){
+        var key=legacy(client);var id=messages.findBySubmissionKey(key).orElseThrow().id;contact.attend(admin,id,new Attention(Status.EN_ATENCION,"NOTA PRIVADA",0L));
+        var linked=contact.linkAccount(admin,id,new AccountLink(1L));assertThat(linked.linked()).isTrue();assertThat(linked.note()).isEqualTo("NOTA PRIVADA");assertThat(linked.history()).hasSize(2);
+        assertThat(contact.mine(client,id).replies()).isEmpty();assertThat(contact.mine(seller,0).items()).isEmpty();
+    }
+    @Test void adminLinkRequiresActiveExactEmailMatch(){
+        var key=UUID.randomUUID();contact.receive(new Submission(key,"Sin cuenta",UUID.randomUUID()+"@gmail.com","Consulta"));var id=messages.findBySubmissionKey(key).orElseThrow().id;
+        assertThatThrownBy(()->contact.linkAccount(admin,id,new AccountLink(0L))).isInstanceOf(cl.kynex.exception.ApiException.class);
+        assertThat(messages.findById(id).orElseThrow().ownerId).isNull();
+        var ownKey=legacy(client);var account=users.findById(client).orElseThrow();account.active=false;users.saveAndFlush(account);
+        assertThatThrownBy(()->contact.linkAccount(admin,messages.findBySubmissionKey(ownKey).orElseThrow().id,new AccountLink(0L))).isInstanceOf(cl.kynex.exception.ApiException.class);
+    }
+    @Test void anonymousClientAndSellerCannotRecoverOwnershipAsAdministrator()throws Exception{
+        var id=messages.findBySubmissionKey(legacy(client)).orElseThrow().id;var path="/api/v1/admin/contact/"+id+"/account-link";
+        http.perform(post(path).contentType(MediaType.APPLICATION_JSON).content("{\"version\":0}")).andExpect(status().isUnauthorized());
+        for(var actor:List.of(client,seller))http.perform(post(path).header("Authorization",token(actor)).contentType(MediaType.APPLICATION_JSON).content("{\"version\":0}")).andExpect(status().isForbidden());
+    }
+    @Test void adminLinkRejectsStaleVersionAndPreservesUnlinkedMessage()throws Exception{
+        var id=messages.findBySubmissionKey(legacy(client)).orElseThrow().id;contact.attend(admin,id,new Attention(Status.EN_ATENCION,"Atención vigente",0L));
+        http.perform(post("/api/v1/admin/contact/"+id+"/account-link").header("Authorization",token(admin)).contentType(MediaType.APPLICATION_JSON).content("{\"version\":0}")).andExpect(status().isConflict());
+        assertThat(messages.findById(id).orElseThrow().ownerId).isNull();assertThat(contact.detail(admin,id).note()).isEqualTo("Atención vigente");
+    }
+    @Test void adminRecoveryIsIdempotentAndDoesNotAcceptArbitraryOwner()throws Exception{
+        var id=messages.findBySubmissionKey(legacy(client)).orElseThrow().id;var first=contact.linkAccount(admin,id,new AccountLink(0L));
+        assertThat(contact.linkAccount(admin,id,new AccountLink(0L)).version()).isEqualTo(first.version());assertThat(contact.detail(admin,id).history()).hasSize(1);
+        http.perform(post("/api/v1/admin/contact/"+id+"/account-link").header("Authorization",token(admin)).contentType(MediaType.APPLICATION_JSON).content("{\"version\":1,\"ownerId\":"+seller+"}")).andExpect(status().isBadRequest());
+        assertThat(contact.mine(client,id).id()).isEqualTo(id);
+    }
+    @Test void roleRevocationBlocksHistoricalLinkWithOldToken()throws Exception{
+        var id=messages.findBySubmissionKey(legacy(client)).orElseThrow().id;var t=token(admin);var actor=users.findById(admin).orElseThrow();actor.role=Role.CLIENTE;users.saveAndFlush(actor);
+        http.perform(post("/api/v1/admin/contact/"+id+"/account-link").header("Authorization",t).contentType(MediaType.APPLICATION_JSON).content("{\"version\":0}")).andExpect(status().isForbidden());
+    }
     @Test void signedSubmissionDerivesOwnerAndIdentityFromAccount()throws Exception{
         var key=UUID.randomUUID();http.perform(post("/api/v1/my/contact").header("Authorization",token(client)).contentType(MediaType.APPLICATION_JSON).content(body(new AccountSubmission(key,"  Consulta personal  "))))
             .andExpect(status().isCreated()).andExpect(jsonPath("$.reference").value(key.toString()));

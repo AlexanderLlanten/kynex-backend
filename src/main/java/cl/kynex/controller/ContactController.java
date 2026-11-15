@@ -28,6 +28,9 @@ public class ContactController {
     public OwnDetail mine(Principal actor,@PathVariable Long id) { return contact.mine(Long.valueOf(actor.getName()),id); }
     @PostMapping("/my/contact/claims") @Operation(summary="Vincular una consulta anterior",description="Requiere sesión, la referencia UUID de recepción y el mismo correo de la cuenta. No asigna consultas por coincidencia de correo.")
     public OwnDetail claim(Principal actor,@Valid @RequestBody Claim data) { return contact.claim(Long.valueOf(actor.getName()),data); }
+    @PostMapping("/admin/contact/{id}/account-link") @PreAuthorize("hasRole('ADMINISTRADOR')")
+    @Operation(summary="Recuperar la vinculación de una consulta anterior",description="Administrador confirma la asociación a la cuenta activa del mismo correo. Requiere versión, conserva notas y respuestas y registra al responsable; no admite elegir otro propietario.")
+    public Detail linkAccount(Principal actor,@PathVariable Long id,@Valid @RequestBody AccountLink data) { return contact.linkAccount(Long.valueOf(actor.getName()),id,data); }
     @PostMapping("/admin/contact/{id}/replies") @PreAuthorize("hasRole('ADMINISTRADOR')")
     @Operation(summary="Publicar una respuesta para el usuario",description="Se conserva aparte de las notas internas. Requiere versión y referencia de reintento; las respuestas se consultan dentro de la cuenta, sin enviar correo.")
     public Detail reply(Principal actor,@PathVariable Long id,@Valid @RequestBody ReplyInput data) { return contact.reply(Long.valueOf(actor.getName()),id,data); }

@@ -65,6 +65,7 @@ public class SecurityConfig {
         http.authorizeHttpRequests(auth -> auth
             .requestMatchers("/api/v1/auth/**", "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/actuator/health").permitAll()
             .requestMatchers(HttpMethod.GET, "/api/v1/products/**", "/api/v1/categories/**", "/api/v1/exercises/**", "/media/products/**", "/media/training/**").permitAll()
+            .requestMatchers(HttpMethod.POST, "/api/v1/contact").permitAll()
             .anyRequest().authenticated());
         http.oauth2ResourceServer(resource -> resource.jwt(jwt -> jwt.jwtAuthenticationConverter(token -> {
             // Reconsulta estado y rol: editar un JWT o una sesión local no concede permisos.

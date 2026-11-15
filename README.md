@@ -40,11 +40,20 @@ $secretGenerator.Dispose()
 Con Docker Desktop iniciado, crear la base:
 
 ```powershell
-docker compose up -d postgres
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 . .\scripts\Load-Environment.ps1
+docker compose up -d postgres
 .\mvnw.cmd spring-boot:run
 ```
+
+Si PostgreSQL ya utiliza el puerto 5432 del equipo, cambiar estas dos líneas en `.env`:
+
+```env
+DB_PORT=5433
+DB_URL=jdbc:postgresql://localhost:5433/kynex
+```
+
+Volver a cargar `.env` antes de ejecutar Docker y Maven, siguiendo el orden anterior. Así ambos servicios utilizan el mismo puerto y el backend no se conecta por error a otra instalación de PostgreSQL. El contenedor mantiene su puerto interno 5432 y sus datos persistentes.
 
 También se admite PostgreSQL instalado directamente: crear una base vacía `kynex`, un usuario con permisos sobre ella y ajustar `DB_URL`, `DB_USERNAME` y `DB_PASSWORD`. Si se cambia `DB_PORT` en Docker, también debe cambiarse el puerto de `DB_URL`.
 

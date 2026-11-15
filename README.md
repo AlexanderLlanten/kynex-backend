@@ -6,6 +6,8 @@ API REST de KYNEX para la evaluación EP3. Implementa cuentas, catálogo, carrit
 
 - Consulta pública de seis productos iniciales, imágenes y categorías.
 - Alta, edición y baja lógica de productos y categorías con autorización de Administrador.
+- Consulta pública de categorías por id. El bloqueo compartido entre asignación de productos y baja de categoría preserva las referencias activas ante concurrencia.
+- Nombres de categoría únicos con plegado Unicode y normalización NFC, incluso con mayúsculas acentuadas y configuración regional distinta del servidor.
 - Precios decimales, stock no negativo, códigos únicos, referencias y control de versión para evitar sobrescribir ediciones concurrentes.
 - Registro de Cliente con RUN verificado, contraseña elegida y hash BCrypt. Conserva nombre, apellidos, correo, fecha de nacimiento opcional, región, comuna y dirección; comprueba su relación. El registro no admite asignar roles.
 - Login, JWT de 10 minutos, identidad actual, renovación rotativa de siete días y logout. El cierre revoca también los accesos de la misma sesión.
@@ -79,7 +81,7 @@ No se incluyen cuentas con contraseñas predeterminadas. Después del alta inici
 | Método | Ruta | Acceso |
 | --- | --- | --- |
 | GET | `/api/v1/products`, `/api/v1/products/{id}` | Público |
-| GET | `/api/v1/categories` | Público |
+| GET | `/api/v1/categories`, `/api/v1/categories/{id}` | Público; solo activas |
 | POST | `/api/v1/products`, `/api/v1/categories` | Administrador |
 | PUT | `/api/v1/products/{id}`, `/api/v1/categories/{id}` | Administrador; enviar `version` |
 | DELETE | `/api/v1/products/{id}?version=0`, `/api/v1/categories/{id}?version=0` | Administrador; baja lógica |
@@ -107,6 +109,10 @@ No se incluyen cuentas con contraseñas predeterminadas. Después del alta inici
 Antes de una operación de autenticación, consultar `/auth/csrf` conservando las cookies y enviar su `token` en la cabecera `X-XSRF-TOKEN`. Swagger incluye esta cabecera en las operaciones correspondientes. El registro exige `run`, `firstName`, `lastName`, `email`, `password`, `region`, `commune` y `address`; `birthDate` es opcional y debe ser anterior a hoy. Las ubicaciones admitidas coinciden con el catálogo de los formularios KYNEX. Las operaciones administrativas utilizan `Authorization: Bearer <accessToken>`.
 
 El producto utiliza `categoryId`, `code`, `name`, `description`, `price`, `stock`, `criticalStock`, `image`, `featured` y `details`. `details` conserva presentación, ingredientes, nutrición y recomendaciones del catálogo. La respuesta aplana esos metadatos para mantener el contrato de los componentes React. Las imágenes iniciales se sirven en `/media/products/`.
+
+La categoría contiene `id`, `name` y `version`. El nombre se recorta y admite hasta 80 caracteres. La migración V7 utiliza el soporte Unicode incorporado de PostgreSQL 18 con base UTF8 para que `PROTEÍNAS` y `Proteínas`, incluidas formas equivalentes del acento, no creen nombres distintos. Se conserva el texto de presentación. Si hubiera duplicados históricos, la creación del índice rechaza la migración en una transacción; no se borran ni fusionan datos automáticamente. La configuración utilizada se describe en [la documentación de PostgreSQL 18](https://www.postgresql.org/docs/18/collation.html).
+
+Una categoría con productos activos no puede desactivarse. Crear o reasignar un producto y desactivar su categoría comparten bloqueo en PostgreSQL: una de las operaciones se completa y la otra reevalúa el estado resultante. La baja conserva la categoría y sus referencias históricas, pero la retira de las consultas públicas. Las ediciones y bajas requieren la versión vigente.
 
 Los errores de validación devuelven 400 y campos en `errors`. Las credenciales inválidas devuelven 401; los permisos insuficientes, 403; los recursos inexistentes, 404; los duplicados, referencias activas y conflictos de versión, 409.
 
@@ -144,7 +150,7 @@ Con Docker puede crearse en el mismo contenedor:
 docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" kynex_test'
 ```
 
-Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; los casos concurrentes utilizan cuentas propias y limpian sus registros. La prueba de stock restaura el producto utilizado. Las 79 pruebas comprueban controladores, propiedad, idempotencia, expiración, roles, versiones, bajas y concurrencia sobre PostgreSQL real. GitHub Actions dispone de su propia base aislada.
+Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; los casos concurrentes utilizan registros propios y los limpian. La prueba de stock restaura el producto utilizado. Las 89 pruebas comprueban controladores, propiedad, idempotencia, expiración, roles, versiones, bajas, unicidad Unicode y concurrencia sobre PostgreSQL real. GitHub Actions dispone de su propia base aislada.
 
 Para obtener el ejecutable:
 
@@ -161,7 +167,7 @@ En la rama EP3 del frontend, copiar `.env.example` como `.env`, definir `VITE_DA
 
 Esta activación conecta catálogo, cuentas, gestión de productos, carrito, checkout, pagos y pedidos. React mantiene el JWT en memoria y recupera la sesión mediante la cookie HttpOnly; no utiliza identidades ni contraseñas demostrativas. Las pestañas coordinan las mutaciones de sesión con Web Locks y reciben avisos sin credenciales mediante BroadcastChannel. Se requiere un navegador moderno y HTTPS en despliegue; localhost admite las pruebas HTTP.
 
-El Administrador gestiona usuarios, productos y estados de pedidos; el Vendedor conserva consulta de productos y pedidos. Cada cuenta dispone de Mi perfil. La interfaz obtiene categorías y conserva metadatos y versión al editar. Rutinas y contacto mantienen su alcance local hasta su integración.
+El Administrador gestiona usuarios, categorías, productos y estados de pedidos; el Vendedor conserva consulta de productos y pedidos. Cada cuenta dispone de Mi perfil. La interfaz conserva metadatos y versión al editar y actualiza el catálogo tras renombrar una categoría. Rutinas y contacto mantienen su alcance local hasta su integración.
 
 ## Condiciones de operación
 

@@ -6,3 +6,6 @@ target/
 .vscode/
 *.log
 .local/
+*.dump
+*.dump.json
+*.dump.partial

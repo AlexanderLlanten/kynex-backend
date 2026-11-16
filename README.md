@@ -224,4 +224,36 @@ El Administrador gestiona usuarios, categorías, productos, ejercicios, estados 
 
 ## Condiciones de operación
 
+### Copia de seguridad y recuperación
+
+Con Docker Desktop abierto y PostgreSQL iniciado, PowerShell 5.1 o superior puede crear una copia sin detener la aplicación:
+
+```powershell
+$copia = .\scripts\Backup-Database.ps1
+$copia.BackupPath
+```
+
+La salida predeterminada es `.local/backups`. Se deben conservar juntos el archivo `.dump` y su `.dump.json`, que registra fecha UTC, versión de PostgreSQL, tamaño y SHA-256. Estas copias contienen información privada y quedan excluidas de Git. Deben guardarse también fuera del equipo, en una ubicación con acceso restringido. La comprobación SHA-256 detecta alteraciones respecto del manifiesto; no constituye una firma de autenticidad. Solo deben restaurarse copias de procedencia confiable.
+
+La recuperación crea otra base y exige un nuevo ingreso de las cuentas:
+
+```powershell
+$recuperacion = .\scripts\Restore-Database.ps1 -BackupPath $copia.BackupPath
+$recuperacion.Database
+```
+
+El destino generado comienza por `kynex_restore_`. Se rechazan bases existentes y el origen; no se borran ni sobrescriben. La restauración utiliza una transacción y verifica el archivo antes de crear el destino. Las sesiones recuperadas quedan revocadas, mientras que las originales permanecen intactas. Un fallo conserva únicamente la base nueva para su diagnóstico.
+
+Antes de utilizar la base recuperada se deben verificar sus datos. Para seleccionarla, cambiar **solo el nombre final de la base** en `DB_URL` dentro de `.env`, conservando el servidor y puerto propios; detener el backend que se está utilizando, cargar nuevamente el entorno e iniciarlo. El original se conserva hasta confirmar la recuperación. No se deben iniciar dos backend en el mismo puerto. La salud puede consultarse en `http://localhost:8080/actuator/health`.
+
+Las herramientas trabajan con el servicio `postgres` de este Compose. Admiten `-ProjectName` y `-EnvironmentFile` para seleccionar explícitamente otro proyecto. La copia admite `-Database` y `-OutputDirectory`; la recuperación admite `-Database` únicamente para un nombre nuevo con el prefijo requerido. El archivo no incluye `.env`, secretos, roles globales de PostgreSQL ni recursos estáticos del repositorio: deben conservarse por separado. No es una herramienta de migración entre versiones distintas de PostgreSQL. El formato se basa en [pg_dump](https://www.postgresql.org/docs/18/app-pgdump.html) y [pg_restore](https://www.postgresql.org/docs/18/app-pgrestore.html) de PostgreSQL 18.
+
+La comprobación operativa crea y retira únicamente bases de prueba con nombres aleatorios:
+
+```powershell
+.\tests\DatabaseRecovery.Tests.ps1
+```
+
+Comprueba 11 escenarios de integridad, Unicode, importes, claves foráneas, secuencias, sesiones y rechazo de sobrescrituras o archivos alterados. Se verificó en PowerShell 5.1 y 7; GitHub Actions la ejecuta en un proyecto Docker independiente. No requiere ejecutar nuevamente las 158 pruebas de aplicación para un cambio exclusivo de estas herramientas.
+
 `COOKIE_SECURE=false` se admite solo en desarrollo HTTP local. En despliegue se necesita HTTPS, cookies seguras, orígenes explícitos, credenciales externas, limitación de intentos, copias de seguridad y prueba de restauración. Esta versión no se presenta como lista para operación productiva. El emulador no efectúa cobros reales ni solicita datos de tarjetas.

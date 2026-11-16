@@ -2,14 +2,13 @@ package cl.kynex.commerce.service;
 
 import cl.kynex.catalog.model.Category;
 import cl.kynex.catalog.model.Product;
-import cl.kynex.catalog.repository.ProductRepository;
+import cl.kynex.catalog.api.InventoryAccess;
 import cl.kynex.commerce.model.CartLine;
 import cl.kynex.commerce.model.CartMerge;
 import cl.kynex.commerce.model.ShoppingCart;
 import cl.kynex.commerce.repository.CartMergeRepository;
 import cl.kynex.commerce.repository.CartRepository;
-import cl.kynex.identity.model.AppUser;
-import cl.kynex.identity.repository.UserRepository;
+import cl.kynex.identity.api.AccountAccess;
 import cl.kynex.commerce.dto.CommerceDtos.*;
 import cl.kynex.shared.exception.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,7 +17,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
 import org.hibernate.Hibernate;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,25 +25,20 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 public class CartService {
     static final BigDecimal FREE_FROM = new BigDecimal("50000.00"), SHIPPING = new BigDecimal("3990.00");
-    private final UserRepository users;
+    private final AccountAccess accounts;
     private final CartRepository carts;
     private final CartMergeRepository merges;
-    private final ProductRepository products;
+    private final InventoryAccess products;
     private final ObjectMapper json;
-    public CartService(UserRepository users, CartRepository carts, CartMergeRepository merges, ProductRepository products, ObjectMapper json) {
-        this.users=users; this.carts=carts; this.merges=merges; this.products=products; this.json=json;
-    }
-    public AppUser lockUser(Long owner) {
-        var user=Hibernate.unproxy(users.lockById(owner).orElseThrow(ApiException::missing), AppUser.class);
-        if (!user.active) throw new ApiException(HttpStatus.UNAUTHORIZED,"La cuenta ya no está activa.");
-        return user;
+    public CartService(AccountAccess accounts, CartRepository carts, CartMergeRepository merges, InventoryAccess products, ObjectMapper json) {
+        this.accounts=accounts; this.carts=carts; this.merges=merges; this.products=products; this.json=json;
     }
     public ShoppingCart cart(Long owner) {
         return carts.findById(owner).orElseGet(() -> { var cart=new ShoppingCart(); cart.userId=owner; return carts.saveAndFlush(cart); });
     }
-    public CartView get(Long owner) { lockUser(owner); return view(cart(owner), List.of()); }
+    public CartView get(Long owner) { accounts.lockActive(owner); return view(cart(owner), List.of()); }
     public CartView quantity(Long owner, Long productId, CartQuantity data) {
-        lockUser(owner); var cart=cart(owner); checkVersion(cart, data.version());
+        accounts.lockActive(owner); var cart=cart(owner); checkVersion(cart, data.version());
         var previous=cart.lines.stream().filter(line -> product(line).id.equals(productId)).findFirst().orElse(null);
         if (data.quantity()==0) { if (previous!=null) { cart.lines.remove(previous); cart.revision++; } }
         else {
@@ -60,12 +53,12 @@ public class CartService {
         carts.saveAndFlush(cart); return view(cart,List.of());
     }
     public CartView clear(Long owner,long version) {
-        lockUser(owner); var cart=cart(owner); checkVersion(cart,version);
+        accounts.lockActive(owner); var cart=cart(owner); checkVersion(cart,version);
         if (!cart.lines.isEmpty()) { cart.lines.clear(); cart.revision++; }
         carts.saveAndFlush(cart); return view(cart,List.of());
     }
     public CartView merge(Long owner,Merge data) {
-        lockUser(owner); var cart=cart(owner);
+        accounts.lockActive(owner); var cart=cart(owner);
         var sorted=data.items().stream().sorted(Comparator.comparing(GuestLine::id)).toList();
         if (sorted.stream().map(GuestLine::id).distinct().count()!=sorted.size()) throw ApiException.invalid("El carrito contiene productos repetidos.");
         String fingerprint=fingerprint(sorted);
@@ -76,7 +69,7 @@ public class CartService {
         }
         var warnings=new ArrayList<String>();
         for (var item:sorted) {
-            var candidate=products.findById(item.id()).orElse(null);
+            var candidate=products.find(item.id()).orElse(null);
             if (candidate==null) { warnings.add("Un producto del carrito visitante ya no existe."); continue; }
             var product=Hibernate.unproxy(candidate,Product.class);
             if (!available(product) || product.stock==0) { warnings.add(product.name+" ya no está disponible."); continue; }
@@ -99,10 +92,7 @@ public class CartService {
     public Product product(CartLine line) { return Hibernate.unproxy(line.product,Product.class); }
     public boolean available(Product product) { return product.active && Hibernate.unproxy(product.category,Category.class).active; }
     public SortedMap<Long,Product> lockedProducts(Collection<Long> ids) {
-        var result=new TreeMap<Long,Product>();
-        // Orden idéntico entre cuentas: evita ciclos de bloqueo al comprar los mismos productos.
-        for (var id:new TreeSet<>(ids)) result.put(id,Hibernate.unproxy(products.lockById(id).orElseThrow(ApiException::missing),Product.class));
-        return result;
+        return products.lock(ids);
     }
     public CartView view(ShoppingCart cart,List<String> initialWarnings) {
         var items=new ArrayList<Map<String,Object>>(); var warnings=new ArrayList<>(initialWarnings);

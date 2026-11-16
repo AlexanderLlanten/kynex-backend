@@ -1,16 +1,12 @@
 package cl.kynex.contact.service;
 
-import cl.kynex.commerce.service.CartService;
+import cl.kynex.identity.api.AccountAccess;
 import cl.kynex.contact.model.ContactEvent;
 import cl.kynex.contact.model.ContactMessage;
 import cl.kynex.contact.model.ContactReply;
 import cl.kynex.contact.repository.ContactEventRepository;
 import cl.kynex.contact.repository.ContactMessageRepository;
 import cl.kynex.contact.repository.ContactReplyRepository;
-import cl.kynex.identity.model.AppUser;
-import cl.kynex.identity.model.Role;
-import cl.kynex.identity.repository.AccountPolicyRepository;
-import cl.kynex.identity.repository.UserRepository;
 
 import cl.kynex.contact.dto.ContactDtos.*;
 import cl.kynex.contact.model.ContactMessage.Status;
@@ -19,7 +15,6 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.Objects;
 import org.springframework.data.domain.*;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,12 +23,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class ContactService {
     private final ContactMessageRepository messages;
     private final ContactEventRepository events;
-    private final UserRepository users;
-    private final AccountPolicyRepository policy;
     private final ContactReplyRepository replies;
-    private final CartService accounts;
-    public ContactService(ContactMessageRepository messages,ContactEventRepository events,UserRepository users,AccountPolicyRepository policy,ContactReplyRepository replies,CartService accounts) {
-        this.messages=messages;this.events=events;this.users=users;this.policy=policy;this.replies=replies;this.accounts=accounts;
+    private final AccountAccess accounts;
+    public ContactService(ContactMessageRepository messages,ContactEventRepository events,ContactReplyRepository replies,AccountAccess accounts) {
+        this.messages=messages;this.events=events;this.replies=replies;this.accounts=accounts;
     }
     public Receipt receive(Submission data) {
         return receive(data,null);
@@ -50,36 +43,34 @@ public class ContactService {
         return new Receipt(saved.submissionKey,saved.createdAt);
     }
     public Receipt receiveOwned(Long owner,AccountSubmission data) {
-        var user=accounts.lockUser(owner);var full=(user.firstName+" "+user.lastName).trim();
+        var user=accounts.lockActive(owner);var full=(user.firstName()+" "+user.lastName()).trim();
         var name=full.substring(0,full.offsetByCodePoints(0,Math.min(100,full.codePointCount(0,full.length()))));
-        return receive(new Submission(data.submissionKey(),name,user.email,data.comment()),owner);
+        return receive(new Submission(data.submissionKey(),name,user.email(),data.comment()),owner);
     }
     private Pageable page(int number) {
         if(number<0||number>100000)throw ApiException.invalid("La página debe estar entre 0 y 100000.");
         return PageRequest.of(number,20,Sort.by(Sort.Direction.DESC,"createdAt","id"));
     }
     public OwnInbox mine(Long owner,int number) {
-        accounts.lockUser(owner);var result=messages.findByOwnerId(owner,page(number));
+        accounts.lockActive(owner);var result=messages.findByOwnerId(owner,page(number));
         return new OwnInbox(result.map(m->new OwnSummary(m.id,m.submissionKey,m.comment.length()>140?m.comment.substring(0,140)+"…":m.comment,m.status,m.createdAt)).getContent(),number,result.getTotalPages(),result.getTotalElements());
     }
     public OwnDetail mine(Long owner,Long id) {
-        accounts.lockUser(owner);return ownView(messages.findByIdAndOwnerId(id,owner).orElseThrow(ApiException::missing));
+        accounts.lockActive(owner);return ownView(messages.findByIdAndOwnerId(id,owner).orElseThrow(ApiException::missing));
     }
     public OwnDetail claim(Long owner,Claim data) {
-        var user=accounts.lockUser(owner);var m=messages.lockByReference(data.reference()).orElseThrow(ApiException::missing);
+        var user=accounts.lockActive(owner);var m=messages.lockByReference(data.reference()).orElseThrow(ApiException::missing);
         if(m.ownerId!=null&&!m.ownerId.equals(owner))throw ApiException.missing();
         if(m.ownerId==null) {
-            if(!m.email.equalsIgnoreCase(user.email.trim()))throw ApiException.missing();
+            if(!m.email.equalsIgnoreCase(user.email().trim()))throw ApiException.missing();
             m.ownerId=owner;m.updatedAt=Instant.now();messages.saveAndFlush(m);
         }
         return ownView(m);
     }
     private java.util.List<ReplyView> published(Long id) { return replies.findByMessageIdOrderById(id).stream().map(r->new ReplyView(r.text,r.createdAt)).toList(); }
     private OwnDetail ownView(ContactMessage m) { return new OwnDetail(m.id,m.submissionKey,m.name,m.email,m.comment,m.status,m.createdAt,published(m.id)); }
-    private AppUser admin(Long actor) {
-        policy.lockPolicy();var account=users.findById(actor).orElseThrow(ApiException::missing);
-        if(!account.active||account.role!=Role.ADMINISTRADOR)throw new ApiException(HttpStatus.FORBIDDEN,"Se requiere una cuenta de Administrador activa.");
-        return account;
+    private AccountAccess.Account admin(Long actor) {
+        return accounts.requireAdministrator(actor);
     }
     public Inbox inbox(Long actor,Status status,int page) {
         admin(actor);var paging=page(page);
@@ -91,14 +82,14 @@ public class ContactService {
     public Detail linkAccount(Long actor,Long id,AccountLink data) {
         var administrator=admin(actor);var initial=messages.findById(id).orElseThrow(ApiException::missing);
         if(initial.ownerId!=null)return view(initial);
-        var candidate=users.findByEmail(initial.email).filter(user->user.active)
+        var candidate=accounts.findActiveByEmail(initial.email)
             .orElseThrow(()->ApiException.invalid("No existe una cuenta activa con el correo de esta consulta."));
-        var account=accounts.lockUser(candidate.id);var message=messages.lockById(id).orElseThrow(ApiException::missing);
+        var account=accounts.lockActive(candidate.id());var message=messages.lockById(id).orElseThrow(ApiException::missing);
         if(message.ownerId!=null)return view(message);
         if(!message.version.equals(data.version()))throw ApiException.conflict("La consulta cambió. Recarga antes de vincularla.");
-        if(!message.email.equalsIgnoreCase(account.email))throw ApiException.conflict("El correo de la cuenta cambió. Recarga antes de vincularla.");
-        message.ownerId=account.id;message.updatedAt=Instant.now();messages.saveAndFlush(message);
-        var event=new ContactEvent();event.messageId=id;event.actorId=actor;event.actorName=administrator.firstName+" "+administrator.lastName;
+        if(!message.email.equalsIgnoreCase(account.email()))throw ApiException.conflict("El correo de la cuenta cambió. Recarga antes de vincularla.");
+        message.ownerId=account.id();message.updatedAt=Instant.now();messages.saveAndFlush(message);
+        var event=new ContactEvent();event.messageId=id;event.actorId=actor;event.actorName=administrator.firstName()+" "+administrator.lastName();
         event.status=message.status;event.note="Vinculación a la cuenta coincidente confirmada por Administración.";event.createdAt=message.updatedAt;events.saveAndFlush(event);
         return view(message);
     }
@@ -115,12 +106,12 @@ public class ContactService {
         m.updatedAt=Instant.now();
         if(m.status==Status.PENDIENTE) {
             m.status=Status.EN_ATENCION;
-            var event=new ContactEvent();event.messageId=id;event.actorId=actor;event.actorName=account.firstName+" "+account.lastName;
+            var event=new ContactEvent();event.messageId=id;event.actorId=actor;event.actorName=account.firstName()+" "+account.lastName();
             event.status=m.status;event.note=m.note;event.createdAt=m.updatedAt;events.saveAndFlush(event);
         }
         messages.saveAndFlush(m);
         var reply=new ContactReply();reply.messageId=id;reply.replyKey=data.replyKey();reply.actorId=actor;
-        reply.actorName=account.firstName+" "+account.lastName;reply.text=text;reply.createdAt=m.updatedAt;replies.saveAndFlush(reply);
+        reply.actorName=account.firstName()+" "+account.lastName();reply.text=text;reply.createdAt=m.updatedAt;replies.saveAndFlush(reply);
         return view(m);
     }
     public Detail attend(Long actor,Long id,Attention data) {
@@ -130,7 +121,7 @@ public class ContactService {
         if(data.status()==Status.RESUELTA&&note.isEmpty())throw ApiException.invalid("Describe la atención antes de resolver la consulta.");
         if(m.status==data.status()&&m.note.equals(note))return view(m);
         m.status=data.status();m.note=note;m.updatedAt=Instant.now();messages.saveAndFlush(m);
-        var event=new ContactEvent();event.messageId=m.id;event.actorId=actor;event.actorName=account.firstName+" "+account.lastName;
+        var event=new ContactEvent();event.messageId=m.id;event.actorId=actor;event.actorName=account.firstName()+" "+account.lastName();
         event.status=m.status;event.note=m.note;event.createdAt=m.updatedAt;events.saveAndFlush(event);
         return view(m);
     }

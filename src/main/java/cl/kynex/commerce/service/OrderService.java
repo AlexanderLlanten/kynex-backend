@@ -10,7 +10,7 @@ import cl.kynex.commerce.model.PurchaseOrder;
 import cl.kynex.commerce.repository.CartRepository;
 import cl.kynex.commerce.repository.OrderRepository;
 import cl.kynex.commerce.repository.PaymentRepository;
-import cl.kynex.identity.repository.UserRepository;
+import cl.kynex.identity.api.AccountAccess;
 import cl.kynex.shared.service.LocationCatalog;
 import cl.kynex.commerce.dto.CommerceDtos.*;
 import cl.kynex.shared.exception.ApiException;
@@ -29,19 +29,19 @@ public class OrderService {
     private final CartRepository carts;
     private final OrderRepository orders;
     private final PaymentRepository payments;
-    private final UserRepository users;
+    private final AccountAccess accounts;
     private final LocationCatalog locations;
     private final PaymentGateway gateway;
     private final Clock clock;
     private final Duration lifetime;
     public OrderService(CartService cartService,CartRepository carts,OrderRepository orders,PaymentRepository payments,
-            UserRepository users,LocationCatalog locations,PaymentGateway gateway,Clock clock,
+            AccountAccess accounts,LocationCatalog locations,PaymentGateway gateway,Clock clock,
             @Value("${kynex.commerce.order-duration:PT15M}") Duration lifetime) {
-        this.cartService=cartService; this.carts=carts; this.orders=orders; this.payments=payments; this.users=users;
+        this.cartService=cartService; this.carts=carts; this.orders=orders; this.payments=payments; this.accounts=accounts;
         this.locations=locations; this.gateway=gateway; this.clock=clock; this.lifetime=lifetime;
     }
     public OrderView checkout(Long owner,Checkout data) {
-        var user=cartService.lockUser(owner);
+        var user=accounts.lockActive(owner);
         var address=new Delivery(data.delivery().recipient().trim(),data.delivery().region().trim(),data.delivery().commune().trim(),data.delivery().address().trim());
         locations.validate(address.region(),address.commune());
         if (address.recipient().isEmpty() || address.address().isEmpty()) throw ApiException.invalid("Completa el destinatario y la dirección.");
@@ -55,7 +55,7 @@ public class OrderService {
         if (cart.lines.isEmpty()) throw ApiException.invalid("El carrito está vacío.");
         var products=cartService.lockedProducts(cart.lines.stream().map(line -> cartService.product(line).id).toList());
         var order=new PurchaseOrder(); order.ownerId=owner; order.requestId=data.requestId(); order.fingerprint=fingerprint;
-        order.customerName=user.firstName+" "+user.lastName; order.customerEmail=user.email;
+        order.customerName=user.firstName()+" "+user.lastName(); order.customerEmail=user.email();
         order.recipient=address.recipient(); order.region=address.region(); order.commune=address.commune(); order.address=address.address();
         order.createdAt=clock.instant(); order.expiresAt=order.createdAt.plus(lifetime); order.subtotal=BigDecimal.ZERO;
         for (var source:cart.lines) {
@@ -71,7 +71,7 @@ public class OrderService {
     }
     private PurchaseOrder ownedLocked(Long owner,Long id) {
         if (!orders.ownerFor(id).orElseThrow(ApiException::missing).equals(owner)) throw ApiException.missing();
-        cartService.lockUser(owner);
+        accounts.lockActive(owner);
         return orders.lockById(id).orElseThrow(ApiException::missing);
     }
     public OrderView get(Long owner,Long id) { var order=ownedLocked(owner,id); expire(order); return view(orders.saveAndFlush(order)); }
@@ -127,7 +127,7 @@ public class OrderService {
     }
     public OrderView transition(Long actor,Long id,Transition data) {
         Long owner=orders.ownerFor(id).orElseThrow(ApiException::missing);
-        users.lockById(owner).orElseThrow(ApiException::missing);
+        accounts.lockExisting(owner);
         var order=orders.lockById(id).orElseThrow(ApiException::missing);
         if (order.status==data.status()) return view(order);
         if (!order.version.equals(data.version())) throw ApiException.conflict("El pedido cambió. Recarga antes de continuar.");

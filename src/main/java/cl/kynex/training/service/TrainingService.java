@@ -1,9 +1,6 @@
 package cl.kynex.training.service;
 
-import cl.kynex.commerce.service.CartService;
-import cl.kynex.identity.model.Role;
-import cl.kynex.identity.repository.AccountPolicyRepository;
-import cl.kynex.identity.repository.UserRepository;
+import cl.kynex.identity.api.AccountAccess;
 import cl.kynex.training.model.Exercise;
 import cl.kynex.training.model.RoutineExercise;
 import cl.kynex.training.model.TrainingRoutine;
@@ -15,7 +12,6 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.*;
 import org.hibernate.Hibernate;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,17 +20,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class TrainingService {
     private final ExerciseRepository exercises;
     private final TrainingRoutineRepository routines;
-    private final CartService accounts;
-    private final UserRepository users;
-    private final AccountPolicyRepository policy;
-    public TrainingService(ExerciseRepository exercises,TrainingRoutineRepository routines,CartService accounts,UserRepository users,AccountPolicyRepository policy) {
-        this.exercises=exercises;this.routines=routines;this.accounts=accounts;this.users=users;this.policy=policy;
+    private final AccountAccess accounts;
+    public TrainingService(ExerciseRepository exercises,TrainingRoutineRepository routines,AccountAccess accounts) {
+        this.exercises=exercises;this.routines=routines;this.accounts=accounts;
     }
     private Exercise exercise(Long id) { return exercises.findById(id).orElseThrow(ApiException::missing); }
     private Exercise lockedExercise(Long id) { return Hibernate.unproxy(exercises.lockById(id).orElseThrow(ApiException::missing),Exercise.class); }
     private void admin(Long actor) {
-        policy.lockPolicy();var user=users.findById(actor).orElseThrow(ApiException::missing);
-        if (!user.active || user.role!=Role.ADMINISTRADOR) throw new ApiException(HttpStatus.FORBIDDEN,"Se requiere una cuenta de Administrador activa.");
+        accounts.requireAdministrator(actor);
     }
     private void version(long current,Long expected) { if (expected==null || current!=expected) throw ApiException.conflict("Los datos cambiaron. Recarga antes de guardar."); }
     @Transactional(readOnly=true) public List<ExerciseView> library() { return exercises.findByActiveTrueOrderById().stream().map(ExerciseView::from).toList(); }
@@ -58,12 +51,12 @@ public class TrainingService {
     }
     private TrainingRoutine owned(Long owner,Long id) {
         if(!routines.ownerOf(id).orElseThrow(ApiException::missing).equals(owner))throw ApiException.missing();
-        accounts.lockUser(owner);return routines.findById(id).orElseThrow(ApiException::missing);
+        accounts.lockActive(owner);return routines.findById(id).orElseThrow(ApiException::missing);
     }
-    public List<RoutineSummary> list(Long owner) { accounts.lockUser(owner);return routines.findByOwnerIdOrderById(owner).stream().map(r->new RoutineSummary(r.id,r.name,r.version,r.items.size(),r.items.stream().mapToInt(i->i.sets).sum(),r.updatedAt)).toList(); }
+    public List<RoutineSummary> list(Long owner) { accounts.lockActive(owner);return routines.findByOwnerIdOrderById(owner).stream().map(r->new RoutineSummary(r.id,r.name,r.version,r.items.size(),r.items.stream().mapToInt(i->i.sets).sum(),r.updatedAt)).toList(); }
     public RoutineView get(Long owner,Long id) { return view(owned(owner,id)); }
     public RoutineView createRoutine(Long owner,RoutineName data) {
-        accounts.lockUser(owner);if(routines.countByOwnerId(owner)>=20)throw ApiException.invalid("Cada cuenta admite hasta 20 rutinas.");
+        accounts.lockActive(owner);if(routines.countByOwnerId(owner)>=20)throw ApiException.invalid("Cada cuenta admite hasta 20 rutinas.");
         var r=new TrainingRoutine();r.ownerId=owner;r.name=name(data.name());r.createdAt=Instant.now();r.updatedAt=r.createdAt;
         return view(routines.saveAndFlush(r));
     }

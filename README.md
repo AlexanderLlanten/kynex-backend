@@ -2,6 +2,38 @@
 
 API REST de KYNEX para la evaluación EP3. Implementa cuentas, catálogo, carrito privado y pedidos con pago emulado persistidos en PostgreSQL y conectados con React. El proyecto completo continúa en desarrollo.
 
+## Arquitectura por módulos de negocio
+
+El backend es un **monolito modular**: una aplicación Spring Boot, un ejecutable y una base PostgreSQL. Los paquetes agrupan cada función del negocio y mantienen sus propias capas:
+
+```text
+cl.kynex
+├── KynexApplication
+├── identity       Usuarios, autenticación, roles y sesiones
+├── catalog        Productos, categorías e inventario
+├── commerce       Carrito, pedidos y pagos emulados
+├── training       Ejercicios y rutinas privadas
+├── contact        Consultas, atención y respuestas
+├── shared         Errores comunes y catálogo de ubicaciones
+└── config         Documentación OpenAPI general
+```
+
+Cada módulo de negocio contiene `controller`, `service`, `model`, `repository` y `dto`. `controller` recibe HTTP; `service` coordina reglas y transacciones; `model` representa entidades y estados; `repository` accede a PostgreSQL; `dto` define las entradas y respuestas. La configuración de seguridad está en `identity/config` y la de compra en `commerce/config`. Los contratos usados entre módulos están en `identity/api` y `catalog/api`; son interfaces Java internas y no agregan endpoints HTTP.
+
+Identidad expone `AccountAccess` para comprobar cuentas, coordinar administración y obtener datos permitidos sin entregar entidades ni contraseñas. Contacto y entrenamiento utilizan ese contrato y no dependen del carrito. Comercio accede al catálogo mediante `InventoryAccess`; los repositorios de cada módulo solo son utilizados dentro de ese módulo. Ambos contratos requieren la transacción del consumidor para mantener los bloqueos hasta finalizar la operación.
+
+Las dependencias permitidas son: identidad y catálogo hacia utilidades compartidas; contacto y entrenamiento hacia la API interna de identidad; comercio hacia identidad y el catálogo. Se conserva expresamente la relación JPA entre la línea del carrito y el producto, y el acceso al modelo de inventario dentro de la transacción comercial. Aprobar o anular un pago mantiene juntos pedido, carrito e inventario. La extracción a servicios independientes requerirá sustituir esa coordinación y separar la propiedad de los datos; organizar paquetes no produce despliegues independientes.
+
+Diez pruebas con ArchUnit verifican límites de paquetes, dependencias permitidas, ausencia de ciclos, repositorios internos, separación de capas y participación en la transacción del consumidor. Se ejecutan sin una base de datos:
+
+```powershell
+.\mvnw.cmd "-Dtest=ModuleArchitectureTest" test
+```
+
+Las pruebas funcionales permanecen organizadas en `identity`, `commerce`, `training`, `contact` e `integration`; el soporte común está en `support`. La regresión completa conserva PostgreSQL real y añade las pruebas de arquitectura: **168 pruebas aprobadas**. Las rutas `/api/v1`, los contratos HTTP, las tablas, las migraciones y los recursos estáticos se mantienen.
+
+Después de descargar esta reorganización se debe detener la instancia anterior y compilar con `clean` para retirar clases generadas que conservan los paquetes antiguos. La limpieza afecta la salida de Maven; no elimina la base ni `.env`.
+
 ## Funciones disponibles
 
 - Consulta pública de seis productos iniciales, imágenes y categorías.
@@ -58,7 +90,7 @@ Con Docker Desktop iniciado, crear la base:
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 . .\scripts\Load-Environment.ps1
 docker compose up -d postgres
-.\mvnw.cmd spring-boot:run
+.\mvnw.cmd clean spring-boot:run
 ```
 
 Si PostgreSQL ya utiliza el puerto 5432 del equipo, cambiar estas dos líneas en `.env`:
@@ -203,12 +235,12 @@ Con Docker puede crearse en el mismo contenedor:
 docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" kynex_test'
 ```
 
-Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; los casos concurrentes utilizan registros propios y los limpian. La prueba de stock restaura el producto utilizado. Las 158 pruebas comprueban controladores, propiedad, límites, idempotencia, expiración, roles, versiones, bajas, Unicode y concurrencia sobre PostgreSQL real. Contacto incluye recuperación administrativa del histórico, respuestas por propietario, separación de notas privadas, reintentos concurrentes, atención e historial, cambios de rol y contratos Swagger. GitHub Actions dispone de su propia base aislada.
+Las pruebas rechazan una base cuyo nombre no termine en `_test` antes de aplicar migraciones. Los casos transaccionales revierten sus cambios; los casos concurrentes utilizan registros propios y los limpian. La prueba de stock restaura el producto utilizado. Las 158 pruebas funcionales comprueban controladores, propiedad, límites, idempotencia, expiración, roles, versiones, bajas, Unicode y concurrencia sobre PostgreSQL real; otras diez verifican la arquitectura, para un total de 168. Contacto incluye recuperación administrativa del histórico, respuestas por propietario, separación de notas privadas, reintentos concurrentes, atención e historial, cambios de rol y contratos Swagger. GitHub Actions dispone de su propia base aislada.
 
 Para obtener el ejecutable:
 
 ```powershell
-.\mvnw.cmd package
+.\mvnw.cmd clean package
 java -jar target\kynex-backend-0.1.0-SNAPSHOT.jar
 ```
 
@@ -254,6 +286,6 @@ La comprobación operativa crea y retira únicamente bases de prueba con nombres
 .\tests\DatabaseRecovery.Tests.ps1
 ```
 
-Comprueba 11 escenarios de integridad, Unicode, importes, claves foráneas, secuencias, sesiones y rechazo de sobrescrituras o archivos alterados. Se verificó en PowerShell 5.1 y 7; GitHub Actions la ejecuta en un proyecto Docker independiente. No requiere ejecutar nuevamente las 158 pruebas de aplicación para un cambio exclusivo de estas herramientas.
+Comprueba 11 escenarios de integridad, Unicode, importes, claves foráneas, secuencias, sesiones y rechazo de sobrescrituras o archivos alterados. Se verificó en PowerShell 5.1 y 7; GitHub Actions la ejecuta en un proyecto Docker independiente. No requiere ejecutar nuevamente la regresión de aplicación para un cambio exclusivo de estas herramientas.
 
 `COOKIE_SECURE=false` se admite solo en desarrollo HTTP local. En despliegue se necesita HTTPS, cookies seguras, orígenes explícitos, credenciales externas, limitación de intentos, copias de seguridad y prueba de restauración. Esta versión no se presenta como lista para operación productiva. El emulador no efectúa cobros reales ni solicita datos de tarjetas.

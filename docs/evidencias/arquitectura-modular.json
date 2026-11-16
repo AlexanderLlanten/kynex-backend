@@ -1,0 +1,90 @@
+{
+  "date": "2026-11-15",
+  "architecture": "Monolito modular Spring Boot",
+  "sourceCommit": "0d4243252ad3554289af279d8778155aece79a40",
+  "modules": [
+    "identity",
+    "catalog",
+    "commerce",
+    "training",
+    "contact"
+  ],
+  "shared": [
+    "shared",
+    "config"
+  ],
+  "layers": [
+    "controller",
+    "service",
+    "model",
+    "repository",
+    "dto"
+  ],
+  "internalApis": [
+    "identity/api/AccountAccess",
+    "catalog/api/InventoryAccess"
+  ],
+  "dependencyRules": [
+    "Cada repositorio permanece dentro de su modulo.",
+    "Otros modulos utilizan la API interna de identidad.",
+    "Contacto y entrenamiento no dependen de comercio ni entre si.",
+    "Comercio utiliza la API de inventario y los modelos transaccionales del catalogo.",
+    "No se admiten ciclos entre modulos."
+  ],
+  "regression": {
+    "failures": 0,
+    "errors": 0,
+    "architecture": 10,
+    "total": 168,
+    "skipped": 0,
+    "command": "mvnw.cmd verify",
+    "database": "PostgreSQL 18.6 aislado",
+    "functional": 158
+  },
+  "compatibility": {
+    "checks": [
+      "Registro e ingreso conservan la cuenta y el rol del cliente.",
+      "OpenAPI conserva íntegramente rutas, operaciones, cuerpos, respuestas y seguridad; solo se excluye la URL del servidor temporal.",
+      "La compra aprobada conserva importe e historial.",
+      "La confirmación repetida del pago no duplica el descuento de inventario.",
+      "El carrito conserva el producto pendiente.",
+      "La rutina conserva nombre, ejercicio, series y repeticiones.",
+      "El propietario consulta su respuesta sin acceder a la nota privada.",
+      "Se mantienen la restricción administrativa y la propiedad de las consultas.",
+      "El frontend compilado conserva ingreso, perfil e historial de compras.",
+      "La consulta y la sesión se recuperan al recargar la ruta privada.",
+      "La rutina funciona desde la interfaz React existente.",
+      "El carrito carga las imágenes y se presenta sin desborde a 390, 768 y 1366 px.",
+      "Logout protege nuevamente el perfil y no hay errores de JavaScript."
+    ],
+    "widths": [
+      390,
+      768,
+      1366
+    ],
+    "failed": 0,
+    "openApi": {
+      "paths": 42,
+      "operations": 64,
+      "canonicalSha256": "99cd62ffa939d3c33cc4b80670fded61bba7980e6f71644e7b3d43c97fddcbcf",
+      "unchanged": true,
+      "excluded": [
+        "servers: dirección de ejecución distinta"
+      ]
+    },
+    "passed": 13,
+    "browser": "Microsoft Edge"
+  },
+  "preservation": {
+    "httpContractUnchanged": true,
+    "reactSourceChanged": false,
+    "schemaMigrationsChanged": false,
+    "purchaseAndInventoryInSingleTransaction": true
+  },
+  "limits": [
+    "Un ejecutable y una base de datos; los modulos no son servicios desplegables independientemente.",
+    "La relacion JPA entre carrito y producto se conserva deliberadamente.",
+    "Extraer servicios requerira separar datos y redisenar coordinacion comercial y manejo de fallos.",
+    "La verificacion del navegador se realizo en el mismo equipo; no reemplaza la aceptacion externa pendiente."
+  ]
+}

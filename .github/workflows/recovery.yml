@@ -1,0 +1,26 @@
+name: Copia y restauracion PostgreSQL
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar PostgreSQL aislado
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .local -Force | Out-Null
+          @('DB_NAME=kynex','DB_USERNAME=kynex','DB_PASSWORD=ci-recovery-isolated-password','DB_PORT=55434') | Set-Content .local/recovery.env
+          docker compose --project-name kynex-recovery-ci --env-file .local/recovery.env up -d --wait postgres
+          if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL no pudo iniciar.' }
+      - name: Verificar copia y restauracion
+        shell: pwsh
+        run: ./tests/DatabaseRecovery.Tests.ps1 -ProjectName kynex-recovery-ci -EnvironmentFile .local/recovery.env
+      - name: Retirar entorno aislado
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path .local/recovery.env) {
+            docker compose --project-name kynex-recovery-ci --env-file .local/recovery.env down --volumes
+          }

@@ -1,0 +1,55 @@
+name: Tres contenedores e integracion
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  stack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: kynex-backend
+      - uses: actions/checkout@v4
+        with:
+          repository: AlexanderLlanten/Fs2_pROYECTO
+          # Corte del frontend con Docker; fija el conjunto que verifica este workflow.
+          ref: 4f19fca0c76088fa43986bbc2f443ea7a8fa0b0d
+          path: Fs2_pROYECTO
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Preparar entorno desechable
+        working-directory: kynex-backend
+        run: |
+          mkdir -p .local
+          node --input-type=module <<'NODE'
+          import { randomBytes } from 'node:crypto';
+          import { writeFileSync } from 'node:fs';
+          const secret = () => randomBytes(32).toString('hex');
+          writeFileSync('.local/docker.env', [
+            'DB_NAME=kynex', 'DB_USERNAME=kynex', 'DB_PASSWORD=' + secret(),
+            'JWT_SECRET=' + secret(), 'DB_PORT=55435',
+            'FRONTEND_PORT=18081', 'BACKEND_PORT=18082',
+            'COOKIE_SECURE=false', 'PAYMENT_EMULATOR_ENABLED=true',
+            'BOOTSTRAP_ADMIN_EMAIL=docker-ci@kynex.test',
+            'BOOTSTRAP_ADMIN_PASSWORD=' + secret()
+          ].join('\n'));
+          NODE
+      - name: Construir e iniciar las tres responsabilidades
+        working-directory: kynex-backend
+        run: docker compose -p kynex-stack-ci --env-file .local/docker.env up --build -d --wait --wait-timeout 240
+      - name: Comprobar API, sesion y flujos por el proxy
+        working-directory: kynex-backend
+        run: |
+          set -a
+          . .local/docker.env
+          set +a
+          STACK_TEST_CONFIRM_ISOLATED=yes STACK_TEST_URL=http://localhost:18081 STACK_ADMIN_EMAIL="$BOOTSTRAP_ADMIN_EMAIL" STACK_ADMIN_PASSWORD="$BOOTSTRAP_ADMIN_PASSWORD" node tests/Stack.Smoke.mjs
+      - name: Ver estado de los servicios
+        if: always()
+        working-directory: kynex-backend
+        run: docker compose -p kynex-stack-ci --env-file .local/docker.env ps
+      - name: Retirar exclusivamente el entorno de CI
+        if: always()
+        working-directory: kynex-backend
+        run: docker compose -p kynex-stack-ci --env-file .local/docker.env down --volumes

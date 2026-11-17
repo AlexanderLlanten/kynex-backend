@@ -1,4 +1,38 @@
 services:
+  frontend:
+    build:
+      context: ${FRONTEND_CONTEXT:-../Fs2_pROYECTO}
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8081}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [web]
+
+  backend:
+    build:
+      context: .
+    environment:
+      PORT: 8080
+      DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-kynex}
+      DB_USERNAME: ${DB_USERNAME:-kynex}
+      DB_PASSWORD: ${DB_PASSWORD:?Definir DB_PASSWORD en .env}
+      # La configuración Java rechaza un secreto vacío o demasiado corto al iniciar.
+      JWT_SECRET: ${JWT_SECRET:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173},http://localhost:${FRONTEND_PORT:-8081}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      PAYMENT_EMULATOR_ENABLED: ${PAYMENT_EMULATOR_ENABLED:-false}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8082}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [web, data]
+
   postgres:
     image: postgres:18.6
     environment:
@@ -14,5 +48,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+    networks: [data]
+networks:
+  web:
+  data:
 volumes:
   postgres_data:

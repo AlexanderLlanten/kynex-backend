@@ -2,6 +2,21 @@
 
 API REST de KYNEX para la evaluación EP3. Implementa cuentas, catálogo, carrito privado y pedidos con pago emulado persistidos en PostgreSQL y conectados con React. El proyecto completo continúa en desarrollo.
 
+## Ejecutar frontend, backend y base de datos con Docker
+
+La ejecución completa utiliza **tres contenedores separados**: `frontend` con React compilado y Nginx, `backend` con Spring Boot y `postgres` con la base persistente. Los dos repositorios deben estar en carpetas hermanas llamadas `Fs2_pROYECTO` y `kynex-backend`, o debe ajustarse `FRONTEND_CONTEXT`.
+
+Desde esta carpeta, con Docker Desktop iniciado, copiar `.env.example` a `.env` únicamente si todavía no existe. Definir contraseña de base, secreto JWT aleatorio y credenciales iniciales propias. Conservar los valores de una instalación anterior.
+
+```powershell
+docker compose up --build -d --wait
+docker compose ps
+```
+
+El sitio abre en **http://localhost:8081** y Swagger en **http://localhost:8082/swagger-ui.html**. No es necesario ejecutar Maven ni Vite en el equipo para esta modalidad. [Instalación, puertos, redes, conservación de datos y comandos Docker](docs/docker.md).
+
+Las instrucciones siguientes de Maven describen la modalidad de desarrollo fuera del contenedor. El comando `docker compose up -d postgres` sigue permitiendo iniciar solamente la base.
+
 ## Arquitectura por módulos de negocio
 
 El backend es un **monolito modular**: una aplicación Spring Boot, un ejecutable y una base PostgreSQL. Los paquetes agrupan cada función del negocio y mantienen sus propias capas:
